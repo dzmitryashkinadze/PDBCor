@@ -1,0 +1,2 @@
+Distance allostery: 0.688322940093349
+Angle allostery: 0.22369910779939775 
