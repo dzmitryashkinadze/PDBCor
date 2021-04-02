@@ -23,19 +23,14 @@ python allosteryExtraction.py demo.pdb
 | ------------- | ------------- |
 |               | **bundle:** str, path to the pdb file |
 |               | **nstates:** int, number of protein states, deafult=2 |
-|               | **mode:** str, mode of allostery, deafult=backbone |
-|               | can be one of the following: |
-|               | backbone - calculate allostery in protein backbone |
-|               | sidechain - calculates allostery in protein sidechain |
-|               | combined - calculates overall allostery |
-|               | full - subsequently calculated backbone, sidechain and combined allostery |
+|               | **mode:** str, mode of allostery, deafult=backbone<br>can be one of the following:<br>backbone - calculate allostery in protein backbone<br>sidechain - calculates allostery in protein sidechain<br>combined - calculates overall allostery<br>full - subsequently calculated backbone, sidechain and combined allostery |
 |               | **graphics:** bool, graphical output, default=True |
 
 Outputs are combined in the folder /allostery, that is created in the parent directory of the source pdb file.
 Outputs include distance and angular correlation results including:
 * text file with allosteric parameters of your bundle (allostery_[mode].txt)
 * lists of correlations between each pair of residues ([ang,dist]_ig_[mode].csv)
-* correlation heatmaps (heatmap_[ang,dist]_[mode].png)
+* correlation heatmaps (heatmap_[ang,dist,cross]_[mode].png)
 * histograms of correlation parameters (hist_[ang,dist]_[mode].png)
 * sequential correlation parameter charts per residue (seq_[ang,dist]_[mode].png)
 * allosteric networks generated with range of different thrasholds (cornet_[ang,dist]_[mode]/graph_thr.png)

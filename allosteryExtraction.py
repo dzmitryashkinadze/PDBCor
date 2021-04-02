@@ -56,31 +56,84 @@ class AllosteryExtraction:
         self.distAll = DistanceAllostery(self.structure, mode, self.resid, nstates, clust_model, pose_estimator)
         self.angAll = AngleAllostery(self.structure, mode, self.resid, nstates, clust_model)
 
-    # write a file with allosteric parameter
-    def write_allostery(self, dist_id, ang_id):
-        # allosteric parameter
-        dist_all = (np.mean(dist_id[:, 2]))
-        ang_all = (np.mean(ang_id[:, 2]))
-        f = open(os.path.join(self.savePath, 'allostery_' + self.mode + '.txt'), "w")
-        f.write('Distance allostery: {}\nAngle allostery: {} '.format(dist_all, ang_all))
-        f.close()
-        return None
+    # calculate information gain between 2 clustering sets
+    def calc_ig(self, clusters1, banres1, clusters2, banres2, symmetrical=False):
+        # calculate mutual information
+        ig_matrix = np.zeros((clusters1.shape[0], clusters1.shape[0]))
+        if symmetrical:
+            print_progress_bar(0, clusters1.shape[0] - 1, prefix='Progress:', suffix='Complete', length=50)
+            for i in range(clusters1.shape[0]):
+                print_progress_bar(i, clusters1.shape[0] - 1, prefix='Progress:', suffix='Complete', length=50)
+                if clusters1[i, 0] not in banres1:
+                    ig_matrix[i, i] = 1
+                    for j in range(i + 1, clusters1.shape[0]):
+                        if (clusters1[i, 0] not in banres1) and (clusters1[j, 0] not in banres1):
+                            ig_loc = adjusted_mutual_info_score(clusters1[i, 1:], clusters1[j, 1:])
+                            ig_matrix[i, j] = ig_loc
+                            ig_matrix[j, i] = ig_loc
+                        else:
+                            ig_matrix[i, j] = None
+                            ig_matrix[j, i] = None
+                else:
+                    ig_matrix[i, i] = None
+                    for j in range(i + 1, clusters1.shape[0]):
+                        ig_matrix[i, j] = None
+                        ig_matrix[j, i] = None
+            ig_list = []
+            for i in range(clusters1.shape[0]):
+                for j in range(i + 1, clusters1.shape[0]):
+                    if (clusters1[i, 0] not in banres1) and (clusters1[j, 0] not in banres1):
+                        ig_list += list(clusters1[i, :1]) + list(clusters1[j, :1]) + [ig_matrix[i, j]]
+        else:
+            print_progress_bar(0, clusters1.shape[0] - 1, prefix='Progress:', suffix='Complete', length=50)
+            for i in range(clusters1.shape[0]):
+                print_progress_bar(i, clusters1.shape[0] - 1, prefix='Progress:', suffix='Complete', length=50)
+                if clusters1[i, 0] not in banres1:
+                    for j in range(clusters2.shape[0]):
+                        if clusters2[j, 0] not in banres2:
+                            ig_loc = adjusted_mutual_info_score(clusters1[i, 1:], clusters2[j, 1:])
+                            ig_matrix[i, j] = ig_loc
+                        else:
+                            ig_matrix[i, j] = None
+                else:
+                    for j in range(1, clusters2.shape[0]):
+                        ig_matrix[i, j] = None
+            ig_list = []
+            for i in range(clusters1.shape[0]):
+                for j in range(clusters2.shape[0]):
+                    if (clusters1[i, 0] not in banres1) and (clusters2[j, 0] not in banres2):
+                        ig_list += list(clusters1[i, :1]) + list(clusters2[j, :1]) + [ig_matrix[i, j]]
+        return np.array(ig_list).reshape(-1, 3), ig_matrix
 
     # execute correlation extraction
     def calc_all(self):
         # extract allostery matrices
-        ang_ig, ang_hm = self.angAll.calc_ig()
-        dist_ig, dist_hm, best_clust = self.distAll.calc_ig()
+        ang_clusters, ang_banres = self.angAll.clust_all()
+        dist_clusters, dist_banres = self.distAll.clust_all()
+        print('########################       MUTUAL INFORMATION       #######################')
+        print('ANGULAR MUTUAL INFORMATION EXTRACTION:')
+        ang_ig, ang_hm = self.calc_ig(ang_clusters, ang_banres, ang_clusters, ang_banres, symmetrical=True)
+        print('DISTANCE MUTUAL INFORMATION EXTRACTION:')
+        dist_ig, dist_hm = self.calc_ig(dist_clusters, dist_banres, dist_clusters, dist_banres, symmetrical=True)
+        print('CROSS MUTUAL INFORMATION EXTRACTION:')
+        cross_ig, cross_hm = self.calc_ig(dist_clusters, dist_banres, ang_clusters, ang_banres, symmetrical=False)
+        # Calculate best coloring vector
+        ig_sum = np.nansum(dist_hm, axis=1)
+        best_res = [i for i in range(len(ig_sum)) if ig_sum[i] == np.nanmax(ig_sum)]
+        best_res = best_res[0]
+        best_clust = dist_clusters[best_res, 1:]
+        print()
         print('############################       FINALIZING       ###########################')
         print('PROCESSING CORRELATION MATRICES')
         pd.DataFrame(ang_ig).to_csv(self.savePath + '/ang_ig_' + self.mode + '.csv', index=False)
         pd.DataFrame(dist_ig).to_csv(self.savePath + '/dist_ig_' + self.mode + '.csv', index=False)
+        pd.DataFrame(cross_ig).to_csv(self.savePath + '/cross_ig_' + self.mode + '.csv', index=False)
         # write allostery parameters
-        self.write_allostery(dist_ig, ang_ig)
+        self.write_allostery(dist_ig, ang_ig, cross_ig)
         # plot everything if graphics is enabled
         if self.graphics:
             print('PLOTTING')
-            self.plot_heatmaps(dist_hm, ang_hm)
+            self.plot_heatmaps(dist_hm, ang_hm, cross_hm)
             self.plot_hist(dist_ig, ang_ig)
             self.plot_all_per_aa(dist_hm, ang_hm)
             self.color_pdb(best_clust)
@@ -94,6 +147,18 @@ class AllosteryExtraction:
         print('DONE')
         print()
         print()
+        print()
+
+    # write a file with allosteric parameter
+    def write_allostery(self, dist_ig, ang_ig, cross_ig):
+        # allosteric parameter
+        dist_all = (np.mean(dist_ig[:, 2]))
+        ang_all = (np.mean(ang_ig[:, 2]))
+        cross_all = (np.mean(cross_ig[:, 2]))
+        f = open(os.path.join(self.savePath, 'allostery_' + self.mode + '.txt'), "w")
+        f.write('Distance allostery: {}\nAngle allostery: {}\nCross allostery: {} '.format(dist_all, ang_all, cross_all))
+        f.close()
+        return None
 
     # construct a chimera executive to view a colored bundle
     def color_pdb(self, best_clust):
@@ -110,19 +175,30 @@ class AllosteryExtraction:
                 f.write('rc("color {} #0.{}")\n'.format(state_color[int(best_clust[i])], int(i + 1)))
 
     # plot the correlation matrix heatmap
-    def plot_heatmaps(self, dist_hm, ang_hm):
+    def plot_heatmaps(self, dist_hm, ang_hm, cross_hm):
         # change color map to display nans as gray
         cmap = copy(get_cmap("viridis"))
         cmap.set_bad('gray')
         # plot distance heatmap
         fig, ax = plt.subplots()
         ax.imshow(dist_hm, origin='lower', extent=[self.aaS, self.aaF, self.aaS, self.aaF], cmap=cmap)
+        plt.xlabel('Distance clustering id')
+        plt.ylabel('Distance clustering id')
         plt.savefig(os.path.join(self.savePath, 'heatmap_dist_' + self.mode + '.png'))
         plt.close()
-        # plot distance heatmap
+        # plot angular heatmap
         fig, ax = plt.subplots()
         ax.imshow(ang_hm, origin='lower', extent=[self.aaS, self.aaF, self.aaS, self.aaF], cmap=cmap)
+        plt.xlabel('Angular clustering id')
+        plt.ylabel('Angular clustering id')
         plt.savefig(os.path.join(self.savePath, 'heatmap_ang_' + self.mode + '.png'))
+        plt.close()
+        # plot cross heatmap
+        fig, ax = plt.subplots()
+        ax.imshow(cross_hm, origin='lower', extent=[self.aaS, self.aaF, self.aaS, self.aaF], cmap=cmap)
+        plt.xlabel('Angular clustering id')
+        plt.ylabel('Distance clustering id')
+        plt.savefig(os.path.join(self.savePath, 'heatmap_cross_' + self.mode + '.png'))
         plt.close()
 
     # plot histogram of correlation parameter
@@ -234,7 +310,7 @@ class DistanceAllostery:
     # Get coordinates of all residues
     def get_coord_matrix(self):
         coord_list = []
-        print('############################   DISTANCE ALLOSTERY   ###########################')
+        print('############################   DISTANCE CLUSTERING   ##########################')
         print('COORDINATE MATRIX BUILDING:')
         print_progress_bar(0, len(self.structure) - 1, prefix='Progress:', suffix='Complete', length=50)
         for model in self.structure.get_models():
@@ -272,48 +348,8 @@ class DistanceAllostery:
                 clusters += [self.resid[i]] + list(np.zeros(len(self.structure)))
             else:
                 clusters += [self.resid[i]] + self.clust_aa(i)
-        clusters = np.array(clusters).reshape(-1, len(self.structure) + 1)
-        return clusters
-
-    # calculate information gain for all residue pairs
-    def calc_ig(self):
-        # calculate clusters
-        clusters = self.clust_all()
-        # calculate mutual information
-        ig_matrix = np.zeros((clusters.shape[0], clusters.shape[0]))
-        print('MUTUAL INFORMATION EXTRACTION PROCESS:')
-        print_progress_bar(0, clusters.shape[0] - 1, prefix='Progress:', suffix='Complete', length=50)
-        for i in range(clusters.shape[0]):
-            print_progress_bar(i, clusters.shape[0] - 1, prefix='Progress:', suffix='Complete', length=50)
-            if clusters[i, 0] not in self.banres:
-                ig_matrix[i, i] = 1
-                for j in range(i + 1, clusters.shape[0]):
-                    if (clusters[i, 0] not in self.banres) and (clusters[j, 0] not in self.banres):
-                        ig_loc = adjusted_mutual_info_score(clusters[i, 1:], clusters[j, 1:])
-                        ig_matrix[i, j] = ig_loc
-                        ig_matrix[j, i] = ig_loc
-                    else:
-                        ig_matrix[i, j] = None
-                        ig_matrix[j, i] = None
-            else:
-                ig_matrix[i, i] = None
-                for j in range(i + 1, clusters.shape[0]):
-                    ig_matrix[i, j] = None
-                    ig_matrix[j, i] = None
-        ig_list = []
-        for i in range(clusters.shape[0]):
-            for j in range(i + 1, clusters.shape[0]):
-                if (clusters[i, 0] not in self.banres) and (clusters[j, 0] not in self.banres):
-                    ig_list += list(clusters[i, :1]) + list(clusters[j, :1]) + [ig_matrix[i, j]]
-        print('###############################################################################')
         print()
-        print()
-        # Calculate best coloring vector
-        ig_sum = np.nansum(ig_matrix, axis=1)
-        best_res = [i for i in range(len(ig_sum)) if ig_sum[i] == np.nanmax(ig_sum)]
-        best_res = best_res[0]
-        best_clust = clusters[best_res, 1:]
-        return np.array(ig_list).reshape(-1, 3), ig_matrix, best_clust
+        return np.array(clusters).reshape(-1, len(self.structure) + 1), self.banres
 
 
 # angle allostery estimator
@@ -388,49 +424,16 @@ class AngleAllostery:
     def clust_all(self):
         # collect all clusterings
         clusters = []
-        print('#############################   ANGLE ALLOSTERY   #############################')
+        print('#############################   ANGLE CLUSTERING   ############################')
         print('ANGLE CLUSTERING PROCESS:')
         print_progress_bar(0, len(self.resid) - 1, prefix='Progress:', suffix='Complete', length=50)
         for i in range(len(self.resid)):
             print_progress_bar(i, len(self.resid) - 1, prefix='Progress:', suffix='Complete', length=50)
             clusters += [self.resid[i]]
             clusters += list(self.clust_aa(self.resid[i]))
-        return np.array(clusters).reshape(-1, self.nConf + 1)
+        print()
+        return np.array(clusters).reshape(-1, self.nConf + 1), self.banres
 
-    # calculate information gain for all residue pairs
-    def calc_ig(self):
-        # calculate clusters
-        clusters = self.clust_all()
-        # calculate mutual information
-        ig_matrix = np.zeros((clusters.shape[0], clusters.shape[0]))
-        print('MUTUAL INFORMATION EXTRACTION PROCESS:')
-        print_progress_bar(0, clusters.shape[0] - 1, prefix='Progress:', suffix='Complete', length=50)
-        for i in range(clusters.shape[0]):
-            print_progress_bar(i, clusters.shape[0] - 1, prefix='Progress:', suffix='Complete', length=50)
-            if clusters[i, 0] not in self.banres:
-                ig_matrix[i, i] = 1
-                for j in range(i + 1, clusters.shape[0]):
-                    if (clusters[i, 0] not in self.banres) and (clusters[j, 0] not in self.banres):
-                        ig_loc = adjusted_mutual_info_score(clusters[i, 1:], clusters[j, 1:])
-                        ig_matrix[i, j] = ig_loc
-                        ig_matrix[j, i] = ig_loc
-                    else:
-                        ig_matrix[i, j] = None
-                        ig_matrix[j, i] = None
-            else:
-                ig_matrix[i, i] = None
-                for j in range(i + 1, clusters.shape[0]):
-                    ig_matrix[i, j] = None
-                    ig_matrix[j, i] = None
-        ig_list = []
-        for i in range(clusters.shape[0]):
-            for j in range(i + 1, clusters.shape[0]):
-                if (clusters[i, 0] not in self.banres) and (clusters[j, 0] not in self.banres):
-                    ig_list += list(clusters[i, :1]) + list(clusters[j, :1]) + [ig_matrix[i, j]]
-        print('###############################################################################')
-        print()
-        print()
-        return np.array(ig_list).reshape(-1, 3), ig_matrix
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Correlation extraction from multistate protein bundles')
@@ -468,7 +471,6 @@ if __name__ == '__main__':
         print('###############################################################################')
         print('############################   {} ALLOSTERY   ###########################'.format(mode.upper()))
         print('###############################################################################')
-        print()
         print()
         a = AllosteryExtraction(args.bundle, mode=mode, nstates=nstates, graphics=graphics)
         a.calc_all()
