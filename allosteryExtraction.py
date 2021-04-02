@@ -125,9 +125,9 @@ class AllosteryExtraction:
         print()
         print('############################       FINALIZING       ###########################')
         print('PROCESSING CORRELATION MATRICES')
-        pd.DataFrame(ang_ig).to_csv(self.savePath + '/ang_ig_' + self.mode + '.csv', index=False)
-        pd.DataFrame(dist_ig).to_csv(self.savePath + '/dist_ig_' + self.mode + '.csv', index=False)
-        pd.DataFrame(cross_ig).to_csv(self.savePath + '/cross_ig_' + self.mode + '.csv', index=False)
+        pd.DataFrame(ang_ig).to_csv(self.savePath + '/ang_ig_' + self.mode + '.csv', index=False, header=None)
+        pd.DataFrame(dist_ig).to_csv(self.savePath + '/dist_ig_' + self.mode + '.csv', index=False, header=None)
+        pd.DataFrame(cross_ig).to_csv(self.savePath + '/cross_ig_' + self.mode + '.csv', index=False, header=None)
         # write allostery parameters
         self.write_allostery(dist_ig, ang_ig, cross_ig)
         # plot everything if graphics is enabled
@@ -138,12 +138,11 @@ class AllosteryExtraction:
             self.plot_all_per_aa(dist_hm, ang_hm)
             self.color_pdb(best_clust)
             try:
-                os.mkdir(os.path.join(self.savePath, 'cornet_dist_' + self.mode))
-                os.mkdir(os.path.join(self.savePath, 'cornet_ang_' + self.mode))
+                os.mkdir(os.path.join(self.savePath, 'cornet_' + self.mode))
             except:
                 pass
             for thr in np.linspace(0.1, 1, 19):
-                self.plot_graph(dist_ig, ang_ig, thr)
+                self.plot_graph(dist_ig, ang_ig, cross_ig, thr)
         print('DONE')
         print()
         print()
@@ -236,41 +235,42 @@ class AllosteryExtraction:
         plt.close()
 
     # plot the allosteric graph
-    def plot_graph(self, dist_ig, ang_ig, threshold=0.2):
+    def plot_graph(self, dist_ig, ang_ig, cross_ig, threshold=0.2):
         # plot allosteric graph for distance allostery
-        ig_loc_id = [i for i in range(dist_ig.shape[0]) if dist_ig[i, 2] > threshold]
-        ig_loc = dist_ig[ig_loc_id, :]
-        if ig_loc.shape[0] > 1:
-            res_loc = np.unique(ig_loc[:, :2])
+        ig_loc_d_id = [i for i in range(dist_ig.shape[0]) if dist_ig[i, 2] >= threshold]
+        ig_loc_d = dist_ig[ig_loc_d_id, :]
+        ig_loc_a_id = [i for i in range(ang_ig.shape[0]) if ang_ig[i, 2] >= threshold]
+        ig_loc_a = ang_ig[ig_loc_a_id, :]
+        ig_loc_c_id = [i for i in range(cross_ig.shape[0]) if cross_ig[i, 2] >= threshold]
+        ig_loc_c = cross_ig[ig_loc_c_id, :]
+        if ig_loc_d.shape[0] + ig_loc_a.shape[0] + ig_loc_c.shape[0] > 1:
+            res_loc_d = np.unique(ig_loc_d[:, :2])
+            res_loc_a = np.unique(ig_loc_a[:, :2])
+            res_loc_cd = np.unique(ig_loc_c[:, 0])
+            res_loc_ca = np.unique(ig_loc_c[:, 1])
+            res_loc_d = np.unique(np.concatenate([res_loc_d, res_loc_cd]))
+            res_loc_a = np.unique(np.concatenate([res_loc_a, res_loc_ca]))
             # create the graph
             G = nx.Graph()
             # add nodes
-            for i in range(len(res_loc)):
-                G.add_node(int(res_loc[i]))
+            color_map = []
+            for i in range(len(res_loc_d)):
+                G.add_node('P'+str(int(res_loc_d[i])))
+                color_map.append('cyan')
+            for i in range(len(res_loc_a)):
+                G.add_node('A'+str(int(res_loc_a[i])))
+                color_map.append('green')
             # add edges
-            for i in range(ig_loc.shape[0]):
-                G.add_edge(int(ig_loc[i, 0]), int(ig_loc[i, 1]))
+            for i in range(ig_loc_d.shape[0]):
+                G.add_edge('P'+str(int(ig_loc_d[i, 0])), 'P'+str(int(ig_loc_d[i, 1])))
+            for i in range(ig_loc_a.shape[0]):
+                G.add_edge('A'+str(int(ig_loc_a[i, 0])), 'A'+str(int(ig_loc_a[i, 1])))
+            for i in range(ig_loc_c.shape[0]):
+                G.add_edge('P'+str(int(ig_loc_c[i, 0])), 'A'+str(int(ig_loc_c[i, 1])))
+            # plotting
             plt.figure()
-            nx.draw_kamada_kawai(G, with_labels=True, font_weight='bold')
-            plt.savefig(os.path.join(self.savePath, 'cornet_dist_' + self.mode + '/graph_' + str(np.round(threshold, 2)) + '.png'))
-            plt.close()
-
-        # plot allosteric graph for angle allostery
-        ig_loc_id = [i for i in range(ang_ig.shape[0]) if ang_ig[i, 2] > threshold]
-        ig_loc = ang_ig[ig_loc_id, :]
-        if ig_loc.shape[0] > 1:
-            res_loc = np.unique(ig_loc[:, :2])
-            # create the graph
-            G = nx.Graph()
-            # add nodes
-            for i in range(len(res_loc)):
-                G.add_node(int(res_loc[i]))
-            # add edges
-            for i in range(ig_loc.shape[0]):
-                G.add_edge(int(ig_loc[i, 0]), int(ig_loc[i, 1]))
-            plt.figure()
-            nx.draw_kamada_kawai(G, with_labels=True, font_weight='bold')
-            plt.savefig(os.path.join(self.savePath, 'cornet_ang_' + self.mode + '/graph_' + str(np.round(threshold, 2)) + '.png'))
+            nx.draw_kamada_kawai(G, with_labels=True, font_weight='bold', node_color=color_map)
+            plt.savefig(os.path.join(self.savePath, 'cornet_' + self.mode + '/graph_' + str(np.round(threshold, 2)) + '.png'))
             plt.close()
 
 
