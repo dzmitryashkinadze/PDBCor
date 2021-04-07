@@ -32,10 +32,11 @@ def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, lengt
 # allostery extraction wrapper class
 class AllosteryExtraction:
     # constructor
-    def __init__(self, path, mode, nstates, graphics):
+    def __init__(self, path, mode, nstates, allnet_cutoff, graphics):
         # HYPERVARIABLES
         directory = 'allostery'
         self.mode = mode
+        self.allnet_cutoff = allnet_cutoff
         self.savePath = os.path.join(os.path.dirname(path), directory)
         self.PDBfilename = os.path.basename(path)
         try:
@@ -125,9 +126,21 @@ class AllosteryExtraction:
         print()
         print('############################       FINALIZING       ###########################')
         print('PROCESSING CORRELATION MATRICES')
-        pd.DataFrame(ang_ig).to_csv(self.savePath + '/ang_ig_' + self.mode + '.csv', index=False, header=None)
-        pd.DataFrame(dist_ig).to_csv(self.savePath + '/dist_ig_' + self.mode + '.csv', index=False, header=None)
-        pd.DataFrame(cross_ig).to_csv(self.savePath + '/cross_ig_' + self.mode + '.csv', index=False, header=None)
+        pd.DataFrame(ang_ig).to_csv(self.savePath + '/ang_ig_' + self.mode + '.csv',
+                                    index=False,
+                                    header=['ID1',
+                                            'ID2',
+                                            'AMI'])
+        pd.DataFrame(dist_ig).to_csv(self.savePath + '/dist_ig_' + self.mode + '.csv',
+                                     index=False,
+                                     header=['ID1',
+                                             'ID2',
+                                             'AMI'])
+        pd.DataFrame(cross_ig).to_csv(self.savePath + '/cross_ig_' + self.mode + '.csv',
+                                      index=False,
+                                      header=['ID1(pos)',
+                                              'ID2(ang)',
+                                              'AMI'])
         # write allostery parameters
         self.write_allostery(dist_ig, ang_ig, cross_ig)
         # plot everything if graphics is enabled
@@ -237,11 +250,17 @@ class AllosteryExtraction:
     # plot the allosteric graph
     def plot_graph(self, dist_ig, ang_ig, cross_ig, threshold=0.2):
         # plot allosteric graph for distance allostery
-        ig_loc_d_id = [i for i in range(dist_ig.shape[0]) if dist_ig[i, 2] >= threshold]
+        ig_loc_d_id = [i for i in range(dist_ig.shape[0]) if
+                       ((dist_ig[i, 2] >= threshold) and
+                       (abs(dist_ig[i, 0]-dist_ig[i, 1]) >= self.allnet_cutoff))]
         ig_loc_d = dist_ig[ig_loc_d_id, :]
-        ig_loc_a_id = [i for i in range(ang_ig.shape[0]) if ang_ig[i, 2] >= threshold]
+        ig_loc_a_id = [i for i in range(ang_ig.shape[0]) if
+                       ((ang_ig[i, 2] >= threshold) and
+                       (abs(ang_ig[i, 0]-ang_ig[i, 1]) >= self.allnet_cutoff))]
         ig_loc_a = ang_ig[ig_loc_a_id, :]
-        ig_loc_c_id = [i for i in range(cross_ig.shape[0]) if cross_ig[i, 2] >= threshold]
+        ig_loc_c_id = [i for i in range(cross_ig.shape[0]) if
+                       ((cross_ig[i, 2] >= threshold) and
+                       (abs(cross_ig[i, 0]-cross_ig[i, 1]) >= self.allnet_cutoff))]
         ig_loc_c = cross_ig[ig_loc_c_id, :]
         if ig_loc_d.shape[0] + ig_loc_a.shape[0] + ig_loc_c.shape[0] > 1:
             res_loc_d = np.unique(ig_loc_d[:, :2])
@@ -445,15 +464,13 @@ if __name__ == '__main__':
                         help='generate graphical output')
     parser.add_argument('--mode', type=str,
                         help='allostery mode')
+    parser.add_argument('--allnet_cutoff', type=int,
+                        help='Minimum sequential difference between residues in the allosteric network')
     args = parser.parse_args()
     if args.nstates:
         nstates = args.nstates
     else:
         nstates = 2
-    if args.graphics:
-        graphics = args.graphics
-    else:
-        graphics = True
     if args.mode:
         if args.mode == 'backbone':
             modes = ['backbone']
@@ -467,10 +484,18 @@ if __name__ == '__main__':
             parser.error('Mode has to be either backbone, sidechain, combined or full')
     else:
         modes = ['backbone']
+    if args.allnet_cutoff:
+        allnet_cutoff = args.allnet_cutoff
+    else:
+        allnet_cutoff = 2
+    if args.graphics:
+        graphics = args.graphics
+    else:
+        graphics = True
     for mode in modes:
         print('###############################################################################')
         print('############################   {} ALLOSTERY   ###########################'.format(mode.upper()))
         print('###############################################################################')
         print()
-        a = AllosteryExtraction(args.bundle, mode=mode, nstates=nstates, graphics=graphics)
+        a = AllosteryExtraction(args.bundle, mode=mode, nstates=nstates, allnet_cutoff=allnet_cutoff, graphics=graphics)
         a.calc_all()

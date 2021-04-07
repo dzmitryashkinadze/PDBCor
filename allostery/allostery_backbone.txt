@@ -1,2 +1,3 @@
-Distance allostery: 0.688322940093349
-Angle allostery: 0.22369910779939775 
+Distance allostery: 0.6667066293722418
+Angle allostery: 0.22593247139742917
+Cross allostery: 0.3869368537131905 
