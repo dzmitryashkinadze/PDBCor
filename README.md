@@ -13,7 +13,7 @@ pip install -r requirements.txt
 
 Analyse correlations of your multistate protein bundle PDB with
 ```
-python allosteryExtraction.py bundle_path --nstates=2 --mode=backbone --graphics=True
+python allosteryExtraction.py bundle_path --nstates=2 --mode=backbone --allnet_cutoff=2 --graphics=True
 
 # Demo example:
 python allosteryExtraction.py demo.pdb
@@ -24,6 +24,7 @@ python allosteryExtraction.py demo.pdb
 |               | **bundle:** str, path to the pdb file |
 |               | **nstates:** int, number of protein states, deafult=2 |
 |               | **mode:** str, mode of allostery, deafult=backbone<br>can be one of the following:<br>backbone - calculate allostery in protein backbone<br>sidechain - calculates allostery in protein sidechain<br>combined - calculates overall allostery<br>full - subsequently calculated backbone, sidechain and combined allostery |
+|               | **allnet_cutoff:** int, minimum sequential difference between residues in the allosteric network |
 |               | **graphics:** bool, graphical output, default=True |
 
 Outputs are combined in the folder /allostery, that is created in the parent directory of the source pdb file.
