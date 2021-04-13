@@ -24,7 +24,7 @@ python correlationExtraction.py demo.pdb
 |               | **bundle:** str, path to the pdb file |
 |               | **--nstates:** int, number of protein states, deafult=2 |
 |               | **--mode:** str, mode of correlations, deafult=backbone<br>can be one of the following:<br>backbone - calculate correlations in protein backbone<br>sidechain - calculates correlations in protein sidechain<br>combined - calculates overall correlations<br>full - subsequently calculated backbone, sidechain and combined correlations |
-|               | **--cornet_cutoff:** int, minimum sequential difference between residues in the correlation network | 
+|               | **--cornet_cutoff:** int, minimum sequential difference between residues in the correlation network |
 |               | **--graphics:** bool, graphical output, default=True |
 
 Outputs are combined in the folder /correlations, that is created in the parent directory of the source pdb file.
