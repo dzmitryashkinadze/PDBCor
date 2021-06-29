@@ -13,7 +13,7 @@ pip install -r requirements.txt
 
 Analyse correlations of your multistate protein bundle PDB with
 ```
-python correlationExtraction.py bundle_path --nstates=2 --mode=backbone --cornet_cutoff=2 --graphics=True
+python correlationExtraction.py bundle_path --nstates=2 --mode=backbone --cornet_cutoff=2 --graphics=True --therm_fluct=1.0
 
 # Demo example:
 python correlationExtraction.py demo.pdb
@@ -26,6 +26,7 @@ python correlationExtraction.py demo.pdb
 |               | **--mode:** str, mode of correlations, deafult=backbone<br>can be one of the following:<br>backbone - calculate correlations in protein backbone<br>sidechain - calculates correlations in protein sidechain<br>combined - calculates overall correlations<br>full - subsequently calculated backbone, sidechain and combined correlations |
 |               | **--cornet_cutoff:** int, minimum sequential difference between residues in the correlation network |
 |               | **--graphics:** bool, graphical output, default=True |
+|               | **--therm_fluct:** float, amplitude of the thermal motion|
 
 Outputs are combined in the folder /correlations, that is created in the parent directory of the source pdb file.
 Outputs include distance and angular correlation results including:

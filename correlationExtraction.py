@@ -10,6 +10,7 @@ import os
 import pandas as pd
 import argparse
 from copy import copy
+from tqdm import tqdm
 
 
 # Visualization
@@ -17,17 +18,6 @@ import matplotlib.pyplot as plt  # Plotting library
 from matplotlib.cm import get_cmap
 import networkx as nx
 plt.ioff()                       # turn off interactive plotting
-
-
-# Print iterations progress
-def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, length=100, fill='X', print_end="\r"):
-    percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
-    filled_length = int(length * iteration // total)
-    bar = fill * filled_length + '-' * (length - filled_length)
-    print(f'\r{prefix} |{bar}| {percent}% {suffix}', end=print_end)
-    # Print New Line on Complete
-    if iteration == total:
-        print()
 
 
 # correlation extraction wrapper class
@@ -63,9 +53,7 @@ class CorrelationExtraction:
         # calculate mutual information
         ami_matrix = np.zeros((clusters1.shape[0], clusters1.shape[0]))
         if symmetrical:
-            print_progress_bar(0, clusters1.shape[0] - 1, prefix='Progress:', suffix='Complete', length=50)
-            for i in range(clusters1.shape[0]):
-                print_progress_bar(i, clusters1.shape[0] - 1, prefix='Progress:', suffix='Complete', length=50)
+            for i in tqdm(range(clusters1.shape[0])):
                 if clusters1[i, 0] not in banres1:
                     ami_matrix[i, i] = 1
                     for j in range(i + 1, clusters1.shape[0]):
@@ -87,9 +75,7 @@ class CorrelationExtraction:
                     if (clusters1[i, 0] not in banres1) and (clusters1[j, 0] not in banres1):
                         ami_list += list(clusters1[i, :1]) + list(clusters1[j, :1]) + [ami_matrix[i, j]]
         else:
-            print_progress_bar(0, clusters1.shape[0] - 1, prefix='Progress:', suffix='Complete', length=50)
-            for i in range(clusters1.shape[0]):
-                print_progress_bar(i, clusters1.shape[0] - 1, prefix='Progress:', suffix='Complete', length=50)
+            for i in tqdm(range(clusters1.shape[0])):
                 if clusters1[i, 0] not in banres1:
                     for j in range(clusters2.shape[0]):
                         if clusters2[j, 0] not in banres2:
@@ -171,7 +157,6 @@ class CorrelationExtraction:
         f = open(os.path.join(self.savePath, 'correlations_' + self.mode + '.txt'), "w")
         f.write('Distance correlations: {}\nAngle correlations: {}\nCross correlations: {} '.format(dist_cor, ang_cor, cross_cor))
         f.close()
-        return None
 
     # construct a chimera executive to view a colored bundle
     def color_pdb(self, best_clust):
@@ -363,6 +348,7 @@ class DistanceCor:
         # scale features down to the unit norm and rearange into the feature matrix
         features = features / np.linalg.norm(np.array(features))
         features = np.array(features).reshape(len(self.structure), -1)
+        # clustering
         return list(self.clust_model.fit_predict(features))
 
     # get clustering matrix
@@ -370,9 +356,7 @@ class DistanceCor:
         self.CM = self.get_coord_matrix()
         clusters = []
         print('DISTANCE CLUSTERING PROCESS:')
-        print_progress_bar(0, len(self.resid) - 1, prefix='Progress:', suffix='Complete', length=50)
-        for i in range(len(self.resid)):
-            print_progress_bar(i, len(self.resid) - 1, prefix='Progress:', suffix='Complete', length=50)
+        for i in tqdm(range(len(self.resid))):
             if self.resid[i] in self.banres:
                 clusters += [self.resid[i]] + list(np.zeros(len(self.structure)))
             else:
@@ -391,9 +375,9 @@ class AngleCor:
         structure.atom_to_internal_coordinates()
         self.resid = resid
         allowedAngles = {
-            'backbone': ['phi', 'psi', 'omega'],
+            'backbone': ['phi', 'psi'],
             'sidechain': ['chi1', 'chi2', 'chi3', 'chi4', 'chi5'],
-            'combined': ['phi', 'psi', 'omega', 'chi1', 'chi2', 'chi3', 'chi4', 'chi5']
+            'combined': ['phi', 'psi', 'chi1', 'chi2', 'chi3', 'chi4', 'chi5']
         }
         bannedResDict = {
             'backbone': [],
@@ -420,8 +404,7 @@ class AngleCor:
 
     # gather angles from one amino acid
     def group_aa(self, aa_id):
-        ind = [i for i in range(self.angle_data.shape[0]) if self.angle_data[i, 1] == aa_id]
-        return self.angle_data[ind, 2:]
+        return self.angle_data[self.angle_data[:, 1] == aa_id, 2:]
 
     # shift angles to avoid clusters spreading over the (-180,180) cyclic coordinate closure
     @staticmethod
@@ -432,8 +415,7 @@ class AngleCor:
         ang_max = ang_sort[ang_max_id]
         ang_shift = ang + 360 - ang_max
         ang_shift = [v - 360 if v > 360 else v for v in ang_shift]
-        ang_center = ang_shift - np.mean(ang_shift)
-        return ang_center
+        return ang_shift - np.mean(ang_shift)
 
     # execute clustering of single residue
     def clust_aa(self, aa_id):
@@ -445,9 +427,7 @@ class AngleCor:
         for i in range(len(self.angleDict)):
             aa_data[:, i] = self.correct_cyclic_angle(aa_data[:, i])
         # CLUSTERING
-        self.clustModel.fit(aa_data)
-        clust = self.clustModel.predict(aa_data)
-        return clust
+        return self.clustModel.fit_predict(aa_data)
 
     # get clustering matrix
     def clust_cor(self):
@@ -455,9 +435,7 @@ class AngleCor:
         clusters = []
         print('#############################   ANGLE CLUSTERING   ############################')
         print('ANGLE CLUSTERING PROCESS:')
-        print_progress_bar(0, len(self.resid) - 1, prefix='Progress:', suffix='Complete', length=50)
-        for i in range(len(self.resid)):
-            print_progress_bar(i, len(self.resid) - 1, prefix='Progress:', suffix='Complete', length=50)
+        for i in tqdm(range(len(self.resid))):
             clusters += [self.resid[i]]
             clusters += list(self.clust_aa(self.resid[i]))
         print()
