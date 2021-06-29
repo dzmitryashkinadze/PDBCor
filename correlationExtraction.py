@@ -11,6 +11,7 @@ import pandas as pd
 import argparse
 from copy import copy
 
+
 # Visualization
 import matplotlib.pyplot as plt  # Plotting library
 from matplotlib.cm import get_cmap
@@ -19,7 +20,7 @@ plt.ioff()                       # turn off interactive plotting
 
 
 # Print iterations progress
-def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, length=100, fill='█', print_end="\r"):
+def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, length=100, fill='X', print_end="\r"):
     percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
     filled_length = int(length * iteration // total)
     bar = fill * filled_length + '-' * (length - filled_length)
@@ -32,7 +33,7 @@ def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, lengt
 # correlation extraction wrapper class
 class CorrelationExtraction:
     # constructor
-    def __init__(self, path, mode, nstates, cornet_cutoff, graphics):
+    def __init__(self, path, mode, nstates, cornet_cutoff, graphics, therm_fluct):
         # HYPERVARIABLES
         directory = 'correlations'
         self.mode = mode
@@ -54,7 +55,7 @@ class CorrelationExtraction:
         self.aaF = max(self.resid)
         clust_model = GaussianMixture(n_components=self.nstates, n_init=25, covariance_type='diag')
         pose_estimator = GaussianMixture(n_init=25, covariance_type='full')
-        self.distCor = DistanceCor(self.structure, mode, self.resid, nstates, clust_model, pose_estimator)
+        self.distCor = DistanceCor(self.structure, mode, self.resid, nstates, clust_model, pose_estimator, therm_fluct)
         self.angCor = AngleCor(self.structure, mode, self.resid, nstates, clust_model)
 
     # calculate information gain between 2 clustering sets
@@ -298,11 +299,12 @@ class CorrelationExtraction:
 # distance correlations estimator
 class DistanceCor:
     # constructor
-    def __init__(self, structure, mode, resid, nstates, clust_model, pose_estimator):
+    def __init__(self, structure, mode, resid, nstates, clust_model, pose_estimator, therm_fluct):
         # HYPERVARIABLES
         self.nstates = nstates  # number of states
         self.clust_model = clust_model
         self.pose_estimator = pose_estimator
+        self.therm_fluct = therm_fluct
         # IMPORT THE STRUCTURE
         self.structure = structure
         self.resid = resid
@@ -310,20 +312,28 @@ class DistanceCor:
         self.backboneAtoms = ['N', 'H', 'CA', 'HA', 'HA2', 'HA3', 'C', 'O']
         self.banres = []
 
-    # Get a center of mass of a given residue
+    # get a center of mass of a given residue
     def get_coord(self, res):
         coord = []
+        atom_number = 0
         for atom in res.get_atoms():
             if self.mode == 'backbone':
                 if atom.id in self.backboneAtoms:
+                    atom_number += 1
                     coord += list(atom.get_coord())
             elif self.mode == 'sidechain':
                 if atom.id not in self.backboneAtoms:
+                    atom_number += 1
                     coord += list(atom.get_coord())
             else:
+                atom_number += 1
                 coord += list(atom.get_coord())
         coord = np.array(coord).reshape(-1, 3)
-        return np.mean(coord, axis=0)
+        # average coordinates of all atoms
+        coord = np.mean(coord, axis=0)
+        # add thermal noise to the residue center
+        coord += np.random.normal(0, self.therm_fluct / np.sqrt(atom_number), 3)
+        return coord
 
     # Get coordinates of all residues
     def get_coord_matrix(self):
@@ -340,15 +350,20 @@ class DistanceCor:
             coord_list.append(model_coord)
         return np.array(coord_list).reshape(len(self.structure), len(self.resid), 3)
 
+    # cluster conformers according to the distances between the ind residue with other residues
     def clust_aa(self, ind):
         features = []
         for model in range(len(self.structure)):
             for i in range(len(self.resid)):
-                # calculate an euclidean distance between residue centers
-                dist = np.sqrt(np.sum((self.CM[model][ind] - self.CM[model][i]) ** 2))
-                features += [dist]
+                if i != ind:
+                    # calculate an euclidean distance between residue centers
+                    dist = np.sqrt(np.sum((self.CM[model][ind] - self.CM[model][i]) ** 2))
+                    # save the distance
+                    features += [dist]
+        # scale features down to the unit norm and rearange into the feature matrix
+        features = features / np.linalg.norm(np.array(features))
         features = np.array(features).reshape(len(self.structure), -1)
-        return list(self.clust_model.fit_predict(normalize(features)))
+        return list(self.clust_model.fit_predict(features))
 
     # get clustering matrix
     def clust_cor(self):
@@ -403,7 +418,7 @@ class AngleCor:
         # extract number of pdb models
         self.nConf = int(max(self.angle_data[:, 0])) + 1
 
-    # Gather angles from one amino acid
+    # gather angles from one amino acid
     def group_aa(self, aa_id):
         ind = [i for i in range(self.angle_data.shape[0]) if self.angle_data[i, 1] == aa_id]
         return self.angle_data[ind, 2:]
@@ -420,7 +435,7 @@ class AngleCor:
         ang_center = ang_shift - np.mean(ang_shift)
         return ang_center
 
-    # Execute clustering of single residue
+    # execute clustering of single residue
     def clust_aa(self, aa_id):
         aa_data = self.group_aa(aa_id)
         if aa_data.shape == (0, 5):
@@ -454,43 +469,41 @@ if __name__ == '__main__':
     parser.add_argument('bundle', type=str,
                         help='protein bundle file path')
     parser.add_argument('--nstates', type=int,
+                        default=2,
                         help='number of states')
     parser.add_argument('--graphics', type=bool,
+                        default=True,
                         help='generate graphical output')
     parser.add_argument('--mode', type=str,
+                        default='backbone',
                         help='correlation mode')
     parser.add_argument('--cornet_cutoff', type=int,
+                        default=2,
                         help='Minimum sequential difference between residues in the correlation network')
+    parser.add_argument('--therm_fluct', type=float,
+                        default=0.2,
+                        help='Thermal fluctuation of distances in the protein bundle')
     args = parser.parse_args()
-    # number of protein states
-    nstates = 2
-    if args.nstates:
-        nstates = args.nstates
     # correlation mode
-    modes = ['backbone']
-    if args.mode:
-        if args.mode == 'backbone':
-            modes = ['backbone']
-        elif args.mode == 'sidechain':
-            modes = ['sidechain']
-        elif args.mode == 'combined':
-            modes = ['combined']
-        elif args.mode == 'full':
-            modes = ['backbone', 'sidechain', 'combined']
-        else:
-            parser.error('Mode has to be either backbone, sidechain, combined or full')
-    if args.cornet_cutoff:
-        cornet_cutoff = args.cornet_cutoff
+    if args.mode == 'backbone':
+        modes = ['backbone']
+    elif args.mode == 'sidechain':
+        modes = ['sidechain']
+    elif args.mode == 'combined':
+        modes = ['combined']
+    elif args.mode == 'full':
+        modes = ['backbone', 'sidechain', 'combined']
     else:
-        cornet_cutoff = 2
-    if args.graphics:
-        graphics = args.graphics
-    else:
-        graphics = True
+        parser.error('Mode has to be either backbone, sidechain, combined or full')
     for mode in modes:
         print('###############################################################################')
         print('############################   {} CORRELATIONS   ########################'.format(mode.upper()))
         print('###############################################################################')
         print()
-        a = CorrelationExtraction(args.bundle, mode=mode, nstates=nstates, cornet_cutoff=cornet_cutoff, graphics=graphics)
+        a = CorrelationExtraction(args.bundle,
+                                  mode=mode,
+                                  nstates=args.nstates,
+                                  cornet_cutoff=args.cornet_cutoff,
+                                  graphics=args.graphics,
+                                  therm_fluct=args.therm_fluct)
         a.calc_cor()
