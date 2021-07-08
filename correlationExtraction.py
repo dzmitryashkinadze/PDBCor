@@ -459,7 +459,7 @@ if __name__ == '__main__':
                         default=2,
                         help='Minimum sequential difference between residues in the correlation network')
     parser.add_argument('--therm_fluct', type=float,
-                        default=0.2,
+                        default=1.0,
                         help='Thermal fluctuation of distances in the protein bundle')
     args = parser.parse_args()
     # correlation mode
