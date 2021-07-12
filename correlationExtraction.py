@@ -103,8 +103,6 @@ class CorrelationExtraction:
         ang_ami, ang_hm = self.calc_ami(ang_clusters, ang_banres, ang_clusters, ang_banres, symmetrical=True)
         print('DISTANCE MUTUAL INFORMATION EXTRACTION:')
         dist_ami, dist_hm = self.calc_ami(dist_clusters, dist_banres, dist_clusters, dist_banres, symmetrical=True)
-        print('CROSS MUTUAL INFORMATION EXTRACTION:')
-        cross_ami, cross_hm = self.calc_ami(dist_clusters, dist_banres, ang_clusters, ang_banres, symmetrical=False)
         # Calculate best coloring vector
         ami_sum = np.nansum(dist_hm, axis=1)
         best_res = [i for i in range(len(ami_sum)) if ami_sum[i] == np.nanmax(ami_sum)]
@@ -123,39 +121,27 @@ class CorrelationExtraction:
                                      header=['ID1',
                                              'ID2',
                                              'AMI'])
-        pd.DataFrame(cross_ami).to_csv(self.savePath + '/cross_ami_' + self.mode + '.csv',
-                                      index=False,
-                                      header=['ID1(pos)',
-                                              'ID2(ang)',
-                                              'AMI'])
         # write correlation parameters
-        self.write_correlations(dist_ami, ang_ami, cross_ami)
+        self.write_correlations(dist_ami, ang_ami)
         # plot everything if graphics is enabled
         if self.graphics:
             print('PLOTTING')
-            self.plot_heatmaps(dist_hm, ang_hm, cross_hm)
+            self.plot_heatmaps(dist_hm, ang_hm)
             self.plot_hist(dist_ami, ang_ami)
             self.plot_cor_per_aa(dist_hm, ang_hm)
             self.color_pdb(best_clust)
-            try:
-                os.mkdir(os.path.join(self.savePath, 'cornet_' + self.mode))
-            except:
-                pass
-            for thr in np.linspace(0.1, 1, 19):
-                self.plot_graph(dist_ami, ang_ami, cross_ami, thr)
         print('DONE')
         print()
         print()
         print()
 
     # write a file with correlation parameters
-    def write_correlations(self, dist_ami, ang_ami, cross_ami):
+    def write_correlations(self, dist_ami, ang_ami):
         # correlation parameters
         dist_cor = (np.mean(dist_ami[:, 2]))
         ang_cor = (np.mean(ang_ami[:, 2]))
-        cross_cor = (np.mean(cross_ami[:, 2]))
         f = open(os.path.join(self.savePath, 'correlations_' + self.mode + '.txt'), "w")
-        f.write('Distance correlations: {}\nAngle correlations: {}\nCross correlations: {} '.format(dist_cor, ang_cor, cross_cor))
+        f.write('Distance correlations: {}\nAngle correlations: {} '.format(dist_cor, ang_cor))
         f.close()
 
     # construct a chimera executive to view a colored bundle
@@ -173,7 +159,7 @@ class CorrelationExtraction:
                 f.write('rc("color {} #0.{}")\n'.format(state_color[int(best_clust[i])], int(i + 1)))
 
     # plot the correlation matrix heatmap
-    def plot_heatmaps(self, dist_hm, ang_hm, cross_hm):
+    def plot_heatmaps(self, dist_hm, ang_hm):
         # change color map to display nans as gray
         cmap = copy(get_cmap("viridis"))
         cmap.set_bad('gray')
@@ -190,13 +176,6 @@ class CorrelationExtraction:
         plt.xlabel('Angular clustering id')
         plt.ylabel('Angular clustering id')
         plt.savefig(os.path.join(self.savePath, 'heatmap_ang_' + self.mode + '.png'))
-        plt.close()
-        # plot cross heatmap
-        fig, ax = plt.subplots()
-        ax.imshow(cross_hm, origin='lower', extent=[self.aaS, self.aaF, self.aaS, self.aaF], cmap=cmap)
-        plt.xlabel('Angular clustering id')
-        plt.ylabel('Distance clustering id')
-        plt.savefig(os.path.join(self.savePath, 'heatmap_cross_' + self.mode + '.png'))
         plt.close()
 
     # plot histogram of correlation parameter
@@ -232,53 +211,6 @@ class CorrelationExtraction:
         plt.ylabel('Correlation')
         plt.savefig(os.path.join(self.savePath, 'seq_ang_' + self.mode + '.png'))
         plt.close()
-
-    # plot the correlation network
-    def plot_graph(self, dist_ami, ang_ami, cross_ami, threshold=0.2):
-        # collect distance correlations above threshold
-        ami_loc_d_id = [i for i in range(dist_ami.shape[0]) if
-                       ((dist_ami[i, 2] >= threshold) and
-                       (abs(dist_ami[i, 0]-dist_ami[i, 1]) >= self.cornet_cutoff))]
-        ami_loc_d = dist_ami[ami_loc_d_id, :]
-        # collect angular correlations above threshold
-        ami_loc_a_id = [i for i in range(ang_ami.shape[0]) if
-                       ((ang_ami[i, 2] >= threshold) and
-                       (abs(ang_ami[i, 0]-ang_ami[i, 1]) >= self.cornet_cutoff))]
-        ami_loc_a = ang_ami[ami_loc_a_id, :]
-        # collect cross correlations above threshold
-        ami_loc_c_id = [i for i in range(cross_ami.shape[0]) if
-                       ((cross_ami[i, 2] >= threshold) and
-                       (abs(cross_ami[i, 0]-cross_ami[i, 1]) >= self.cornet_cutoff))]
-        ami_loc_c = cross_ami[ami_loc_c_id, :]
-        if ami_loc_d.shape[0] + ami_loc_a.shape[0] + ami_loc_c.shape[0] > 1:
-            res_loc_d = np.unique(ami_loc_d[:, :2])
-            res_loc_a = np.unique(ami_loc_a[:, :2])
-            res_loc_cd = np.unique(ami_loc_c[:, 0])
-            res_loc_ca = np.unique(ami_loc_c[:, 1])
-            res_loc_d = np.unique(np.concatenate([res_loc_d, res_loc_cd]))
-            res_loc_a = np.unique(np.concatenate([res_loc_a, res_loc_ca]))
-            # create the graph
-            G = nx.Graph()
-            # add nodes
-            color_map = []
-            for i in range(len(res_loc_d)):
-                G.add_node('P'+str(int(res_loc_d[i])))
-                color_map.append('cyan')
-            for i in range(len(res_loc_a)):
-                G.add_node('A'+str(int(res_loc_a[i])))
-                color_map.append('green')
-            # add edges
-            for i in range(ami_loc_d.shape[0]):
-                G.add_edge('P'+str(int(ami_loc_d[i, 0])), 'P'+str(int(ami_loc_d[i, 1])))
-            for i in range(ami_loc_a.shape[0]):
-                G.add_edge('A'+str(int(ami_loc_a[i, 0])), 'A'+str(int(ami_loc_a[i, 1])))
-            for i in range(ami_loc_c.shape[0]):
-                G.add_edge('P'+str(int(ami_loc_c[i, 0])), 'A'+str(int(ami_loc_c[i, 1])))
-            # plotting
-            plt.figure()
-            nx.draw_kamada_kawai(G, with_labels=True, font_weight='bold', node_color=color_map)
-            plt.savefig(os.path.join(self.savePath, 'cornet_' + self.mode + '/graph_' + str(np.round(threshold, 2)) + '.png'))
-            plt.close()
 
 
 # distance correlations estimator
@@ -459,7 +391,7 @@ if __name__ == '__main__':
                         default=2,
                         help='Minimum sequential difference between residues in the correlation network')
     parser.add_argument('--therm_fluct', type=float,
-                        default=1.0,
+                        default=0.5,
                         help='Thermal fluctuation of distances in the protein bundle')
     args = parser.parse_args()
     # correlation mode

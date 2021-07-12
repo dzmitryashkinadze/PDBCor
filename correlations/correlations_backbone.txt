@@ -1,3 +1,2 @@
-Distance correlations: 0.8971770924234385
-Angle correlations: 0.22593247139742917
-Cross correlations: 0.44332431421752794 
+Distance correlations: 0.7081873868037698
+Angle correlations: 0.2532175818945151 
