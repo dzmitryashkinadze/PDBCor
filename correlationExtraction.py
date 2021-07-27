@@ -1,9 +1,8 @@
 # Clustering algorithm
 from sklearn.mixture import GaussianMixture
-from sklearn.preprocessing import normalize
 
 # Import other libraries
-from Bio.PDB.PDBParser import PDBParser    # pdb extraction
+from Bio.PDB.PDBParser import PDBParser  # pdb extraction
 from sklearn.metrics import adjusted_mutual_info_score
 import numpy as np
 import os
@@ -12,30 +11,36 @@ import argparse
 from copy import copy
 from tqdm import tqdm
 
-
 # Visualization
 import matplotlib.pyplot as plt  # Plotting library
 from matplotlib.cm import get_cmap
 import networkx as nx
-plt.ioff()                       # turn off interactive plotting
+
+plt.ioff()  # turn off interactive plotting
 
 
 # correlation extraction wrapper class
 class CorrelationExtraction:
     # constructor
-    def __init__(self, path, mode, nstates, cornet_cutoff, graphics, therm_fluct):
+    def __init__(self,
+                 path,
+                 mode,
+                 nstates,
+                 therm_fluct,
+                 therm_iter,
+                 loop_start,
+                 loop_end):
         # HYPERVARIABLES
         directory = 'correlations'
         self.mode = mode
-        self.cornet_cutoff = cornet_cutoff
         self.savePath = os.path.join(os.path.dirname(path), directory)
         self.PDBfilename = os.path.basename(path)
+        self.therm_iter = therm_iter
         try:
             os.mkdir(self.savePath)
         except:
             pass
         self.nstates = nstates  # number of states
-        self.graphics = graphics
         # CREATE CORRELATION ESTIMATORS WITH STRUCTURE ANG CLUSTERING MODEL
         self.structure = PDBParser().get_structure('test', path)
         self.resid = []
@@ -45,7 +50,15 @@ class CorrelationExtraction:
         self.aaF = max(self.resid)
         clust_model = GaussianMixture(n_components=self.nstates, n_init=25, covariance_type='diag')
         pose_estimator = GaussianMixture(n_init=25, covariance_type='full')
-        self.distCor = DistanceCor(self.structure, mode, self.resid, nstates, clust_model, pose_estimator, therm_fluct)
+        self.distCor = DistanceCor(self.structure,
+                                   mode,
+                                   self.resid,
+                                   nstates,
+                                   clust_model,
+                                   pose_estimator,
+                                   therm_fluct,
+                                   loop_start,
+                                   loop_end)
         self.angCor = AngleCor(self.structure, mode, self.resid, nstates, clust_model)
 
     # calculate information gain between 2 clustering sets
@@ -94,45 +107,61 @@ class CorrelationExtraction:
         return np.array(ami_list).reshape(-1, 3), ami_matrix
 
     # execute correlation extraction
-    def calc_cor(self):
-        # extract correlation matrices
+    def calc_cor(self, graphics=True):
+        # extract angle correlation matrices
+        print()
+        print()
+        print('#############################   ANGLE CLUSTERING   ############################')
         ang_clusters, ang_banres = self.angCor.clust_cor()
-        dist_clusters, dist_banres = self.distCor.clust_cor()
-        print('########################       MUTUAL INFORMATION       #######################')
         print('ANGULAR MUTUAL INFORMATION EXTRACTION:')
         ang_ami, ang_hm = self.calc_ami(ang_clusters, ang_banres, ang_clusters, ang_banres, symmetrical=True)
-        print('DISTANCE MUTUAL INFORMATION EXTRACTION:')
-        dist_ami, dist_hm = self.calc_ami(dist_clusters, dist_banres, dist_clusters, dist_banres, symmetrical=True)
+        # Run a series of thermally corrected distance correlation extractions
+        print()
+        print()
+        print('############################   DISTANCE CLUSTERING   ##########################')
+        for i in range(self.therm_iter):
+            dist_clusters, dist_banres = self.distCor.clust_cor()
+            print('DISTANCE MUTUAL INFORMATION EXTRACTION, RUN {}:'.format(i + 1))
+            dist_ami_loc, dist_hm_loc = self.calc_ami(dist_clusters, dist_banres, dist_clusters, dist_banres, symmetrical=True)
+            if i == 0:
+                dist_ami = dist_ami_loc
+                dist_hm = dist_hm_loc
+            else:
+                dist_ami = np.dstack((dist_ami, dist_ami_loc))
+                dist_hm = np.dstack((dist_hm, dist_hm_loc))
+        # Average them
+        if self.therm_iter > 1:
+            dist_ami = np.mean(dist_ami, axis=2)
+            dist_hm = np.mean(dist_hm, axis=2)
         # Calculate best coloring vector
         ami_sum = np.nansum(dist_hm, axis=1)
         best_res = [i for i in range(len(ami_sum)) if ami_sum[i] == np.nanmax(ami_sum)]
         best_res = best_res[0]
         best_clust = dist_clusters[best_res, 1:]
         print()
+        print()
         print('############################       FINALIZING       ###########################')
         print('PROCESSING CORRELATION MATRICES')
         pd.DataFrame(ang_ami).to_csv(self.savePath + '/ang_ami_' + self.mode + '.csv',
-                                    index=False,
-                                    header=['ID1',
-                                            'ID2',
-                                            'AMI'])
-        pd.DataFrame(dist_ami).to_csv(self.savePath + '/dist_ami_' + self.mode + '.csv',
                                      index=False,
                                      header=['ID1',
                                              'ID2',
                                              'AMI'])
+        pd.DataFrame(dist_ami).to_csv(self.savePath + '/dist_ami_' + self.mode + '.csv',
+                                      index=False,
+                                      header=['ID1',
+                                              'ID2',
+                                              'AMI'])
         # write correlation parameters
         self.write_correlations(dist_ami, ang_ami)
         # plot everything if graphics is enabled
-        if self.graphics:
+        if graphics:
             print('PLOTTING')
             self.plot_heatmaps(dist_hm, ang_hm)
             self.plot_hist(dist_ami, ang_ami)
             self.plot_cor_per_aa(dist_hm, ang_hm)
             self.color_pdb(best_clust)
         print('DONE')
-        print()
-        print()
         print()
 
     # write a file with correlation parameters
@@ -216,12 +245,23 @@ class CorrelationExtraction:
 # distance correlations estimator
 class DistanceCor:
     # constructor
-    def __init__(self, structure, mode, resid, nstates, clust_model, pose_estimator, therm_fluct):
+    def __init__(self,
+                 structure,
+                 mode,
+                 resid,
+                 nstates,
+                 clust_model,
+                 pose_estimator,
+                 therm_fluct,
+                 loop_start,
+                 loop_end):
         # HYPERVARIABLES
         self.nstates = nstates  # number of states
         self.clust_model = clust_model
         self.pose_estimator = pose_estimator
         self.therm_fluct = therm_fluct
+        self.loop_start = loop_start
+        self.loop_end = loop_end
         # IMPORT THE STRUCTURE
         self.structure = structure
         self.resid = resid
@@ -255,11 +295,12 @@ class DistanceCor:
     # Get coordinates of all residues
     def get_coord_matrix(self):
         coord_list = []
-        print('############################   DISTANCE CLUSTERING   ##########################')
         for model in self.structure.get_models():
             model_coord = []
             for res in model.get_residues():
-                if not (self.mode == 'sidechain' and res.get_resname() == 'GLY'):
+                if not (self.mode == 'sidechain' and \
+                        res.get_resname() == 'GLY') and not \
+                        (self.loop_end >= res.id[1] >= self.loop_start):
                     model_coord.append(self.get_coord(res))
                 else:
                     self.banres += [res.id[1]]
@@ -293,7 +334,6 @@ class DistanceCor:
                 clusters += [self.resid[i]] + list(np.zeros(len(self.structure)))
             else:
                 clusters += [self.resid[i]] + self.clust_aa(i)
-        print()
         return np.array(clusters).reshape(-1, len(self.structure) + 1), self.banres
 
 
@@ -342,7 +382,7 @@ class AngleCor:
     @staticmethod
     def correct_cyclic_angle(ang):
         ang_sort = np.sort(ang)
-        ang_cycled = np.append(ang_sort, ang_sort[0]+360)
+        ang_cycled = np.append(ang_sort, ang_sort[0] + 360)
         ang_max_id = np.argmax(np.diff(ang_cycled))
         ang_max = ang_sort[ang_max_id]
         ang_shift = ang + 360 - ang_max
@@ -365,12 +405,10 @@ class AngleCor:
     def clust_cor(self):
         # collect all clusterings
         clusters = []
-        print('#############################   ANGLE CLUSTERING   ############################')
         print('ANGLE CLUSTERING PROCESS:')
         for i in tqdm(range(len(self.resid))):
             clusters += [self.resid[i]]
             clusters += list(self.clust_aa(self.resid[i]))
-        print()
         return np.array(clusters).reshape(-1, self.nConf + 1), self.banres
 
 
@@ -381,18 +419,21 @@ if __name__ == '__main__':
     parser.add_argument('--nstates', type=int,
                         default=2,
                         help='number of states')
-    parser.add_argument('--graphics', type=bool,
-                        default=True,
-                        help='generate graphical output')
     parser.add_argument('--mode', type=str,
                         default='backbone',
                         help='correlation mode')
-    parser.add_argument('--cornet_cutoff', type=int,
-                        default=2,
-                        help='Minimum sequential difference between residues in the correlation network')
     parser.add_argument('--therm_fluct', type=float,
                         default=0.5,
                         help='Thermal fluctuation of distances in the protein bundle')
+    parser.add_argument('--therm_iter', type=int,
+                        default=1,
+                        help='Number of thermal simulations')
+    parser.add_argument('--loop_start', type=int,
+                        default=-1,
+                        help='Start of the loop')
+    parser.add_argument('--loop_end', type=int,
+                        default=-1,
+                        help='End of the loop')
     args = parser.parse_args()
     # correlation mode
     if args.mode == 'backbone':
@@ -413,7 +454,8 @@ if __name__ == '__main__':
         a = CorrelationExtraction(args.bundle,
                                   mode=mode,
                                   nstates=args.nstates,
-                                  cornet_cutoff=args.cornet_cutoff,
-                                  graphics=args.graphics,
-                                  therm_fluct=args.therm_fluct)
+                                  therm_fluct=args.therm_fluct,
+                                  therm_iter=args.therm_iter,
+                                  loop_start=args.loop_start,
+                                  loop_end=args.loop_end)
         a.calc_cor()
