@@ -3,6 +3,7 @@ from sklearn.mixture import GaussianMixture
 
 # Import other libraries
 from Bio.PDB.PDBParser import PDBParser  # pdb extraction
+from Bio.PDB.Polypeptide import is_aa
 from sklearn.metrics import adjusted_mutual_info_score
 import numpy as np
 import os
@@ -45,7 +46,8 @@ class CorrelationExtraction:
         self.structure = PDBParser().get_structure('test', path)
         self.resid = []
         for res in self.structure[0].get_residues():
-            self.resid.append(res._id[1])
+            if is_aa(res, standard=True):
+                self.resid.append(res._id[1])
         self.aaS = min(self.resid)
         self.aaF = max(self.resid)
         clust_model = GaussianMixture(n_components=self.nstates, n_init=25, covariance_type='diag')
@@ -298,13 +300,14 @@ class DistanceCor:
         for model in self.structure.get_models():
             model_coord = []
             for res in model.get_residues():
-                if not (self.mode == 'sidechain' and \
-                        res.get_resname() == 'GLY') and not \
-                        (self.loop_end >= res.id[1] >= self.loop_start):
-                    model_coord.append(self.get_coord(res))
-                else:
-                    self.banres += [res.id[1]]
-                    model_coord.append([0, 0, 0])
+                if is_aa(res, standard=True):
+                    if not (self.mode == 'sidechain' and \
+                            res.get_resname() == 'GLY') and not \
+                            (self.loop_end >= res.id[1] >= self.loop_start):
+                        model_coord.append(self.get_coord(res))
+                    else:
+                        self.banres += [res.id[1]]
+                        model_coord.append([0, 0, 0])
             coord_list.append(model_coord)
         return np.array(coord_list).reshape(len(self.structure), len(self.resid), 3)
 
@@ -363,13 +366,14 @@ class AngleCor:
         angles = []
         for model in structure.get_models():
             for res in model.get_residues():
-                if res.internal_coord and res.get_resname() not in bannedRes:
-                    entry = [res.get_full_id()[1],
-                             res.id[1]]
-                    for angle in self.angleDict:
-                        entry += [res.internal_coord.get_angle(angle)]
-                    entry = [0 if v is None else v for v in entry]
-                    angles += entry
+                if is_aa(res, standard=True):
+                    if res.internal_coord and res.get_resname() not in bannedRes:
+                        entry = [res.get_full_id()[1],
+                                 res.id[1]]
+                        for angle in self.angleDict:
+                            entry += [res.internal_coord.get_angle(angle)]
+                        entry = [0 if v is None else v for v in entry]
+                        angles += entry
         self.angle_data = np.array(angles).reshape(-1, 2 + len(self.angleDict))
         # extract number of pdb models
         self.nConf = int(max(self.angle_data[:, 0])) + 1
@@ -419,6 +423,9 @@ if __name__ == '__main__':
     parser.add_argument('--nstates', type=int,
                         default=2,
                         help='number of states')
+    parser.add_argument('--graphics', type=bool,
+                        default=True,
+                        help='generate graphical output')
     parser.add_argument('--mode', type=str,
                         default='backbone',
                         help='correlation mode')
@@ -458,4 +465,4 @@ if __name__ == '__main__':
                                   therm_iter=args.therm_iter,
                                   loop_start=args.loop_start,
                                   loop_end=args.loop_end)
-        a.calc_cor()
+        a.calc_cor(graphics=args.graphics)
