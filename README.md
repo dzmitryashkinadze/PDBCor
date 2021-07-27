@@ -1,4 +1,4 @@
-# pdb_correlation_extraction
+# PDBCor
 Extraction of the correlations from the multistate pdb protein coordinates
 
 Required software:
@@ -37,5 +37,4 @@ Outputs include distance and angular correlation results including:
 * correlation heatmaps (heatmap_{ang,dist,cross}_{mode}.png)
 * histograms of correlation parameters (hist_{ang,dist}_{mode}.png)
 * sequential correlation parameter charts per residue (seq_{ang,dist}_{mode}.png)
-* correlation network generated with range of different thrasholds (cornet_{mode}/graph_thr.png)
 * chimera executable to visualize a multistate bundle (bundle_vis_{mode}.py)
