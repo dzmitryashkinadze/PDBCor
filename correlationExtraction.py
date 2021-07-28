@@ -25,12 +25,12 @@ class CorrelationExtraction:
     # constructor
     def __init__(self,
                  path,
-                 mode,
-                 nstates,
-                 therm_fluct,
-                 therm_iter,
-                 loop_start,
-                 loop_end):
+                 mode='backbone',
+                 nstates=2,
+                 therm_fluct=0.5,
+                 therm_iter=1,
+                 loop_start=-1,
+                 loop_end=-1):
         # HYPERVARIABLES
         directory = 'correlations'
         self.mode = mode
