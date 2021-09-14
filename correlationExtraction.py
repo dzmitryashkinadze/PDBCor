@@ -15,7 +15,6 @@ from tqdm import tqdm
 # Visualization
 import matplotlib.pyplot as plt  # Plotting library
 from matplotlib.cm import get_cmap
-import networkx as nx
 
 plt.ioff()  # turn off interactive plotting
 
@@ -28,7 +27,7 @@ class CorrelationExtraction:
                  mode='backbone',
                  nstates=2,
                  therm_fluct=0.5,
-                 therm_iter=1,
+                 therm_iter=5,
                  loop_start=-1,
                  loop_end=-1):
         # HYPERVARIABLES
@@ -155,7 +154,7 @@ class CorrelationExtraction:
                                               'ID2',
                                               'AMI'])
         # write correlation parameters
-        self.write_correlations(dist_ami, ang_ami)
+        self.write_correlations(dist_ami, ang_ami, best_clust)
         # plot everything if graphics is enabled
         if graphics:
             print('PLOTTING')
@@ -167,12 +166,15 @@ class CorrelationExtraction:
         print()
 
     # write a file with correlation parameters
-    def write_correlations(self, dist_ami, ang_ami):
+    def write_correlations(self, dist_ami, ang_ami, best_clust):
         # correlation parameters
         dist_cor = (np.mean(dist_ami[:, 2]))
         ang_cor = (np.mean(ang_ami[:, 2]))
         f = open(os.path.join(self.savePath, 'correlations_' + self.mode + '.txt'), "w")
-        f.write('Distance correlations: {}\nAngle correlations: {} '.format(dist_cor, ang_cor))
+        f.write('Distance correlations: {}\nAngle correlations: {} \n'.format(dist_cor, ang_cor))
+        for i in range(self.nstates):
+            pop = len([j for j in best_clust if j == i]) / len(best_clust)
+            f.write('State {} population: {} \n'.format(i+1, pop))
         f.close()
 
     # construct a chimera executive to view a colored bundle
@@ -433,7 +435,7 @@ if __name__ == '__main__':
                         default=0.5,
                         help='Thermal fluctuation of distances in the protein bundle')
     parser.add_argument('--therm_iter', type=int,
-                        default=1,
+                        default=5,
                         help='Number of thermal simulations')
     parser.add_argument('--loop_start', type=int,
                         default=-1,
