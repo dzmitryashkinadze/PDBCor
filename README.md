@@ -13,8 +13,6 @@ pip install -r requirements.txt
 
 Analyse correlations of your multistate protein bundle PDB with
 ```
-python correlationExtraction.py bundle_path --nstates=2 --mode=backbone --graphics=True --therm_fluct=1.0 --therm_iter=1
-
 # Demo example:
 python correlationExtraction.py demo.pdb
 ```
@@ -24,7 +22,6 @@ python correlationExtraction.py demo.pdb
 |               | **bundle:** str, path to the pdb file |
 |               | **--nstates:** int, number of protein states, deafult=2 |
 |               | **--mode:** str, mode of correlations, deafult=backbone<br>can be one of the following:<br>backbone - calculate correlations in protein backbone<br>sidechain - calculates correlations in protein sidechain<br>combined - calculates overall correlations<br>full - subsequently calculated backbone, sidechain and combined correlations |
-|               | **--graphics:** bool, graphical output, default=True |
 |               | **--therm_fluct:** float, amplitude of the thermal motion, default=0.5|
 |               | **--therm_iter:** int, number of thermal simulations, default=1|
 |               | **--loop_start:** int, start of the loop (residue index), default=-1|
@@ -32,7 +29,7 @@ python correlationExtraction.py demo.pdb
 
 Outputs are combined in the folder /correlations, that is created in the parent directory of the source pdb file.
 Outputs include distance and angular correlation results including:
-* text file with correlation parameters of your bundle (correlations_{mode}.txt)
+* text file with correlation parameters of your bundle and state populations (correlations_{mode}.txt)
 * lists of correlations between each pair of residues ({ang,dist,cross}_ig_{mode}.csv)
 * correlation heatmaps (heatmap_{ang,dist,cross}_{mode}.png)
 * histograms of correlation parameters (hist_{ang,dist}_{mode}.png)
