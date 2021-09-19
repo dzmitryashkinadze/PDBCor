@@ -152,6 +152,8 @@ class CorrelationExtraction:
                                               'AMI'])
         # write correlation parameters
         self.write_correlations(dist_ami, ang_ami, best_clust, chainPath)
+        # create a chimera executable
+        self.color_pdb(best_clust, chainPath)
         # plot everything if graphics is enabled
         if graphics:
             print('PLOTTING')
@@ -161,7 +163,6 @@ class CorrelationExtraction:
                 self.plot_heatmaps(dist_hm, ang_hm, chainPath)
                 self.plot_hist(dist_ami, ang_ami, chainPath)
                 self.plot_cor_per_aa(dist_hm, ang_hm, chainPath)
-                self.color_pdb(best_clust, chainPath)
             except:
                 None
         print('DONE')
@@ -185,7 +186,7 @@ class CorrelationExtraction:
         chimera_path = os.path.join(path, 'bundle_vis_' + self.mode + '.py')
         with open(chimera_path, 'w') as f:
             f.write('from chimera import runCommand as rc\n')
-            f.write('rc("open ../{}")\n'.format(self.PDBfilename))
+            f.write('rc("open ../../{}")\n'.format(self.PDBfilename))
             f.write('rc("background solid white")\n')
             f.write('rc("~ribbon")\n')
             f.write('rc("show :.a@ca")\n')
