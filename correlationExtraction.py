@@ -182,7 +182,7 @@ class CorrelationExtraction:
 
     # construct a chimera executive to view a colored bundle
     def color_pdb(self, best_clust, path):
-        state_color = ['#00FFFF', '#FF00FF', '#FFFF00', '#000000']
+        state_color = ['#00FFFF', '#00008b', '#FF00FF', '#FFFF00', '#000000']
         chimera_path = os.path.join(path, 'bundle_vis_' + self.mode + '.py')
         with open(chimera_path, 'w') as f:
             f.write('from chimera import runCommand as rc\n')
