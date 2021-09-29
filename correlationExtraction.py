@@ -335,6 +335,7 @@ class DistanceCor:
     def clust_cor(self, chain, resid):
         self.resid = resid
         self.CM = self.get_coord_matrix(chain)
+        self.resid = [i for i in self.resid if i not in self.banres]
         clusters = []
         print('DISTANCE CLUSTERING PROCESS:')
         for i in tqdm(range(len(self.resid))):
