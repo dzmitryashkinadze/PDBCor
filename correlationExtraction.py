@@ -13,10 +13,10 @@ from copy import copy
 from tqdm import tqdm
 
 # Visualization
-import matplotlib.pyplot as plt  # Plotting library
+import matplotlib
+matplotlib.use('agg')
+from matplotlib import pyplot as plt  # Plotting library
 from matplotlib.cm import get_cmap
-
-plt.ioff()  # turn off interactive plotting
 
 
 # correlation extraction wrapper class
@@ -204,14 +204,14 @@ class CorrelationExtraction:
         ax.imshow(dist_hm, origin='lower', extent=[self.aaS, self.aaF, self.aaS, self.aaF], cmap=cmap)
         plt.xlabel('Distance clustering id')
         plt.ylabel('Distance clustering id')
-        plt.savefig(os.path.join(path, 'heatmap_dist_' + self.mode + '.png'))
+        plt.savefig(os.path.join(path, 'heatmap_dist_' + self.mode + '.png'), bbox_inches='tight')
         plt.close()
         # plot angular heatmap
         fig, ax = plt.subplots()
         ax.imshow(ang_hm, origin='lower', extent=[self.aaS, self.aaF, self.aaS, self.aaF], cmap=cmap)
         plt.xlabel('Angular clustering id')
         plt.ylabel('Angular clustering id')
-        plt.savefig(os.path.join(path, 'heatmap_ang_' + self.mode + '.png'))
+        plt.savefig(os.path.join(path, 'heatmap_ang_' + self.mode + '.png'), bbox_inches='tight')
         plt.close()
 
     # plot histogram of correlation parameter
@@ -220,13 +220,13 @@ class CorrelationExtraction:
         plt.hist(dist_ami[:, 2], bins=50)
         plt.xlabel('Information gain')
         plt.ylabel('Density')
-        plt.savefig(os.path.join(path, 'hist_dist_' + self.mode + '.png'))
+        plt.savefig(os.path.join(path, 'hist_dist_' + self.mode + '.png'), bbox_inches='tight')
         plt.close()
         # plot angle correlation histogram
         plt.hist(ang_ami[:, 2], bins=50)
         plt.xlabel('Information gain')
         plt.ylabel('Density')
-        plt.savefig(os.path.join(path, 'hist_ang_' + self.mode + '.png'))
+        plt.savefig(os.path.join(path, 'hist_ang_' + self.mode + '.png'), bbox_inches='tight')
         plt.close()
 
     # plot the correlations per amino acid barplot
@@ -237,7 +237,7 @@ class CorrelationExtraction:
         plt.bar(range(self.aaS, self.aaF + 1), cor_seq, width=0.8)
         plt.xlabel('Residue')
         plt.ylabel('Correlation')
-        plt.savefig(os.path.join(path, 'seq_dist_' + self.mode + '.png'))
+        plt.savefig(os.path.join(path, 'seq_dist_' + self.mode + '.png'), bbox_inches='tight')
         plt.close()
         # plot sequential angle correlations
         cor_seq = np.mean(np.nan_to_num(ang_hm), axis=0)
@@ -245,7 +245,7 @@ class CorrelationExtraction:
         plt.bar(range(self.aaS, self.aaF + 1), cor_seq, width=0.8)
         plt.xlabel('Residue')
         plt.ylabel('Correlation')
-        plt.savefig(os.path.join(path, 'seq_ang_' + self.mode + '.png'))
+        plt.savefig(os.path.join(path, 'seq_ang_' + self.mode + '.png'), bbox_inches='tight')
         plt.close()
 
 
