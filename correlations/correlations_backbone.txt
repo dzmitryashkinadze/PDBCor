@@ -1,2 +1,0 @@
-Distance correlations: 0.7081873868037698
-Angle correlations: 0.2532175818945151 
