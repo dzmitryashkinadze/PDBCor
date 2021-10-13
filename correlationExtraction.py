@@ -7,8 +7,6 @@ from Bio.PDB.Polypeptide import is_aa
 from sklearn.metrics import adjusted_mutual_info_score
 import numpy as np
 import os
-import json
-import shutil
 import pandas as pd
 import argparse
 from copy import copy
@@ -19,6 +17,7 @@ import matplotlib
 matplotlib.use('agg')
 from matplotlib import pyplot as plt  # Plotting library
 from matplotlib.cm import get_cmap
+from matplotlib.ticker import FormatStrFormatter
 
 
 # correlation extraction wrapper class
@@ -159,15 +158,9 @@ class CorrelationExtraction:
         # plot everything if graphics is enabled
         if graphics:
             print('PLOTTING')
-            # plot through the try option so that it does not crash server calculations
-            # that can not have graphical output
-            try:
-                self.plot_heatmaps(dist_hm, ang_hm, chainPath)
-                self.plot_hist(dist_ami, ang_ami, chainPath)
-                self.plot_cor_per_aa(dist_hm, ang_hm, chainPath)
-            except:
-                None
-        shutil.make_archive(self.savePath, 'zip', self.savePath + '/')
+            self.plot_heatmaps(dist_hm, ang_hm, chainPath)
+            self.plot_hist(dist_ami, ang_ami, chainPath)
+            self.plot_cor_per_aa(dist_hm, ang_hm, chainPath)
         print('DONE')
         print()
 
@@ -205,51 +198,85 @@ class CorrelationExtraction:
         # plot distance heatmap
         fig, ax = plt.subplots()
         ax.imshow(dist_hm, origin='lower', extent=[self.aaS, self.aaF, self.aaS, self.aaF], cmap=cmap)
-        plt.xlabel('Distance clustering id')
-        plt.ylabel('Distance clustering id')
-        plt.savefig(os.path.join(path, 'heatmap_dist_' + self.mode + '.png'), bbox_inches='tight')
+        plt.xlabel('Sequence ID')
+        plt.ylabel('Sequence ID')
+        plt.savefig(os.path.join(path, 'heatmap_dist_' + self.mode + '.png'), dpi=300, bbox_inches='tight')
         plt.close()
         # plot angular heatmap
         fig, ax = plt.subplots()
         ax.imshow(ang_hm, origin='lower', extent=[self.aaS, self.aaF, self.aaS, self.aaF], cmap=cmap)
-        plt.xlabel('Angular clustering id')
-        plt.ylabel('Angular clustering id')
-        plt.savefig(os.path.join(path, 'heatmap_ang_' + self.mode + '.png'), bbox_inches='tight')
+        plt.xlabel('Sequence ID')
+        plt.ylabel('Sequence ID')
+        plt.savefig(os.path.join(path, 'heatmap_ang_' + self.mode + '.png'), dpi=300, bbox_inches='tight')
         plt.close()
 
     # plot histogram of correlation parameter
     def plot_hist(self, dist_ami, ang_ami, path):
         # plot distance correlation histogram
-        plt.hist(dist_ami[:, 2], bins=50)
-        plt.xlabel('Information gain')
+        plt.hist(dist_ami[:, 2], bins=50, density=True)
+        plt.xlabel('Correlation')
         plt.ylabel('Density')
-        plt.savefig(os.path.join(path, 'hist_dist_' + self.mode + '.png'), bbox_inches='tight')
+        plt.savefig(os.path.join(path, 'hist_dist_' + self.mode + '.png'), dpi=300, bbox_inches='tight')
         plt.close()
         # plot angle correlation histogram
-        plt.hist(ang_ami[:, 2], bins=50)
-        plt.xlabel('Information gain')
+        plt.hist(ang_ami[:, 2], bins=50, density=True)
+        plt.xlabel('Correlation')
         plt.ylabel('Density')
-        plt.savefig(os.path.join(path, 'hist_ang_' + self.mode + '.png'), bbox_inches='tight')
+        plt.savefig(os.path.join(path, 'hist_ang_' + self.mode + '.png'), dpi=300, bbox_inches='tight')
         plt.close()
+
+
+    # create subplot
+    def custom_bar_subplot(self, cor_seq, ax, ind):
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        range_loc = range(self.aaS + 50 * ind, min(self.aaF + 1, self.aaS + 50 * (ind + 1)))
+        cor_seq_loc = cor_seq[(50 * ind):min(len(cor_seq), 50 * (ind + 1))]
+        max_cor = max(cor_seq_loc)
+        ax.bar(range_loc, cor_seq_loc, width=0.8)
+        for ind2, cor in enumerate(cor_seq_loc):
+            ax.text(range_loc[ind2] - 0.45, cor + max_cor / 100, '{:.2f}'.format(cor), fontsize=7)
+        if len(cor_seq) < 50:
+            ax.set_xlim(self.aaS + 50 * ind - 1, self.aaF + 1)
+        else:
+            ax.set_xlim(self.aaS + 50 * ind - 1, self.aaS + 50 * (ind + 1))
+        ax.set_ylim(0, max(cor_seq))
+        ax.set_xticks(range_loc)
+        ax.set_xticklabels([i for i in range_loc], fontsize=7)
+        ax.yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
+        ax.set_ylabel('Correlation')
+        if ind == np.ceil(len(cor_seq) / 50) - 1:
+            ax.set_xlabel('Sequence ID')
+
+
+    # custom bar plot
+    def custom_bar_plot(self, cor_seq, path):
+        fig, axs = plt.subplots(nrows=int(np.ceil(len(cor_seq) / 50)),
+                                ncols=1,
+                                figsize=(16, 4 * int(np.ceil(len(cor_seq) / 50))))
+        if len(cor_seq) < 50:
+            self.custom_bar_subplot(cor_seq, axs, 0)
+        else:
+            for ind, ax in enumerate(axs):
+                self.custom_bar_subplot(cor_seq, ax, ind)
+        plt.subplots_adjust(left=0.125,
+                            bottom=-0.8,
+                            right=0.9,
+                            top=0.9,
+                            wspace=0.2,
+                            hspace=0.2)
+        plt.savefig(path, dpi=300, bbox_inches='tight')
+        plt.close()
+
 
     # plot the correlations per amino acid barplot
     def plot_cor_per_aa(self, dist_hm, ang_hm, path):
         # plot sequential distance correlations
         cor_seq = np.mean(np.nan_to_num(dist_hm), axis=0)
-        plt.figure()
-        plt.bar(range(self.aaS, self.aaF + 1), cor_seq, width=0.8)
-        plt.xlabel('Residue')
-        plt.ylabel('Correlation')
-        plt.savefig(os.path.join(path, 'seq_dist_' + self.mode + '.png'), bbox_inches='tight')
-        plt.close()
+        self.custom_bar_plot(cor_seq, os.path.join(path, 'seq_dist_' + self.mode + '.png'))
         # plot sequential angle correlations
         cor_seq = np.mean(np.nan_to_num(ang_hm), axis=0)
-        plt.figure()
-        plt.bar(range(self.aaS, self.aaF + 1), cor_seq, width=0.8)
-        plt.xlabel('Residue')
-        plt.ylabel('Correlation')
-        plt.savefig(os.path.join(path, 'seq_ang_' + self.mode + '.png'), bbox_inches='tight')
-        plt.close()
+        self.custom_bar_plot(cor_seq, os.path.join(path, 'seq_ang_' + self.mode + '.png'))
 
 
 # distance correlations estimator
@@ -456,10 +483,6 @@ if __name__ == '__main__':
                         default=-1,
                         help='End of the loop')
     args = parser.parse_args()
-    args_dict = vars(args)
-    args_path = os.path.join(os.path.dirname(args.bundle), 'args.json')
-    with open(args_path, 'w') as outfile:
-        json.dump(args_dict, outfile)
     # correlation mode
     if args.mode == 'backbone':
         modes = ['backbone']
