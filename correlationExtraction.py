@@ -7,6 +7,8 @@ from Bio.PDB.Polypeptide import is_aa
 from sklearn.metrics import adjusted_mutual_info_score
 import numpy as np
 import os
+import json
+import shutil
 import pandas as pd
 import argparse
 from copy import copy
@@ -161,6 +163,7 @@ class CorrelationExtraction:
             self.plot_heatmaps(dist_hm, ang_hm, chainPath)
             self.plot_hist(dist_ami, ang_ami, chainPath)
             self.plot_cor_per_aa(dist_hm, ang_hm, chainPath)
+            shutil.make_archive(self.savePath, 'zip', self.savePath + '/')
         print('DONE')
         print()
 
@@ -483,6 +486,10 @@ if __name__ == '__main__':
                         default=-1,
                         help='End of the loop')
     args = parser.parse_args()
+    args_dict = vars(args)
+    args_path = os.path.join(os.path.dirname(args.bundle), 'args.json')
+    with open(args_path, 'w') as outfile:
+        json.dump(args_dict, outfile)
     # correlation mode
     if args.mode == 'backbone':
         modes = ['backbone']
