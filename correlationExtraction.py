@@ -240,15 +240,22 @@ class CorrelationExtraction:
         ax.spines['right'].set_visible(False)
         range_loc = range(self.aaS + 50 * ind, min(self.aaF + 1, self.aaS + 50 * (ind + 1)))
         cor_seq_loc = cor_seq[(50 * ind):min(len(cor_seq), 50 * (ind + 1))]
-        max_cor = max(cor_seq_loc)
-        ax.bar(range_loc, cor_seq_loc - min(cor_seq), width=0.8, bottom=min(cor_seq))
+        if min(cor_seq) < 0:
+            cor_range = max(cor_seq) - min(cor_seq)
+            ax.set_ylim(min(cor_seq) - cor_range / 8, max(cor_seq) + cor_range / 8)
+        else:
+            ax.set_ylim(0, max(cor_seq))
+            cor_range = max(cor_seq)
+        ax.bar(range_loc, cor_seq_loc, width=0.8)
         for ind2, cor in enumerate(cor_seq_loc):
-            ax.text(range_loc[ind2] - 0.25, cor + max_cor / 50, '{:.3f}'.format(cor), fontsize=10, rotation=90)
+            if cor >= 0:
+                ax.text(range_loc[ind2] - 0.25, cor + cor_range / 50, '{:.3f}'.format(cor), fontsize=10, rotation=90)
+            else:
+                ax.text(range_loc[ind2] - 0.25, cor - cor_range / 11, '{:.3f}'.format(cor), fontsize=10, rotation=90)
         if len(cor_seq) < 50:
             ax.set_xlim(self.aaS + 50 * ind - 1, self.aaF + 1)
         else:
             ax.set_xlim(self.aaS + 50 * ind - 1, self.aaS + 50 * (ind + 1))
-        ax.set_ylim(min(cor_seq), max(cor_seq))
         ax.set_xticks(range_loc)
         ax.set_xticklabels([i for i in range_loc], fontsize=10, rotation=90)
         ax.yaxis.set_major_formatter(FormatStrFormatter('%.3f'))
