@@ -16,6 +16,7 @@ from tqdm import tqdm
 
 # Visualization
 import matplotlib
+
 matplotlib.use('agg')
 from matplotlib import pyplot as plt  # Plotting library
 from matplotlib.cm import get_cmap
@@ -69,7 +70,7 @@ class CorrelationExtraction:
         # calculate mutual information
         ami_list = []
         for i in tqdm(range(clusters.shape[0])):
-            for j in range(i+1, clusters.shape[0]):
+            for j in range(i + 1, clusters.shape[0]):
                 cor = adjusted_mutual_info_score(clusters[i, 1:], clusters[j, 1:])
                 ami_list += list(clusters[i, :1]) + list(clusters[j, :1]) + [cor]
         ami_list = np.array(ami_list).reshape(-1, 3)
@@ -134,6 +135,9 @@ class CorrelationExtraction:
         if self.therm_iter > 1:
             dist_ami = np.mean(dist_ami, axis=2)
             dist_hm = np.mean(dist_hm, axis=2)
+        # round correlations down to 3 significant numbers
+        dist_ami[:, 2] = np.around(dist_ami[:, 2], 4)
+        ang_ami[:, 2] = np.around(ang_ami[:, 2], 4)
         # Calculate best coloring vector
         ami_sum = np.nansum(dist_hm, axis=1)
         best_res = [i for i in range(len(ami_sum)) if ami_sum[i] == np.nanmax(ami_sum)]
@@ -143,21 +147,27 @@ class CorrelationExtraction:
         print()
         print('############################       FINALIZING       ###########################')
         print('PROCESSING CORRELATION MATRICES')
-        pd.DataFrame(ang_ami).to_csv(chainPath + '/ang_ami_' + self.mode + '.csv',
-                                     index=False,
-                                     header=['ID1',
+        df = pd.DataFrame(ang_ami, columns=['ID1',
+                                            'ID2',
+                                            'Correlation'])
+        df['ID1'] = df['ID1'].astype('int')
+        df['ID2'] = df['ID2'].astype('int')
+        df.to_csv(chainPath + '/ang_ami_' + self.mode + '.csv',
+                  index=False)
+        df = pd.DataFrame(dist_ami, columns=['ID1',
                                              'ID2',
-                                             'AMI'])
-        pd.DataFrame(dist_ami).to_csv(chainPath + '/dist_ami_' + self.mode + '.csv',
-                                      index=False,
-                                      header=['ID1',
-                                              'ID2',
-                                              'AMI'])
+                                             'Correlation'])
+        df['ID1'] = df['ID1'].astype('int')
+        df['ID2'] = df['ID2'].astype('int')
+        df.to_csv(chainPath + '/dist_ami_' + self.mode + '.csv',
+                  index=False)
         # write correlation parameters
         self.write_correlations(dist_ami, ang_ami, best_clust, chainPath)
         # create a chimera executable
         self.color_pdb(best_clust, chainPath)
-        # plot everything if graphics is enabled
+        # write readme file
+        shutil.copyfile('README.txt', os.path.join(chainPath, 'README.txt'))
+        # plot everything
         if graphics:
             print('PLOTTING')
             self.plot_heatmaps(dist_hm, os.path.join(chainPath, 'heatmap_dist_' + self.mode + '.png'))
@@ -175,12 +185,17 @@ class CorrelationExtraction:
         # correlation parameters
         dist_cor = (np.mean(dist_ami[:, 2]))
         ang_cor = (np.mean(ang_ami[:, 2]))
-        f = open(os.path.join(path, 'correlations_' + self.mode + '.txt'), "w")
-        f.write('Distance correlations: {}\nAngle correlations: {} \n'.format(dist_cor, ang_cor))
-        for i in range(self.nstates):
-            pop = len([j for j in best_clust if j == i]) / len(best_clust)
-            f.write('State {} population: {} \n'.format(i+1, pop))
-        f.close()
+        with open(os.path.join(path, 'correlations_' + self.mode + '.txt'), "w") as f:
+            f.write('Distance correlations: {}\nAngle correlations: {} \n'.format(dist_cor, ang_cor))
+            for i in range(self.nstates):
+                pop = len([j for j in best_clust if j == i]) / len(best_clust)
+                f.write('State {} population: {} \n'.format(i + 1, pop))
+        result_dist = {
+            'dist_cor': np.around(dist_cor, 4),
+            'ang_cor': np.around(ang_cor, 4)
+        }
+        with open(os.path.join(path, 'results.json'), 'w') as outfile:
+            json.dump(result_dist, outfile)
 
     # construct a chimera executive to view a colored bundle
     def color_pdb(self, best_clust, path):
@@ -217,12 +232,11 @@ class CorrelationExtraction:
         plt.savefig(path, dpi=300, bbox_inches='tight')
         plt.close()
 
-
     # plot histogram of correlation parameter
     def plot_hist(self, ami, path):
         # plot distance correlation histogram
         start = np.floor(min(ami[:, 2]) * 50) / 50
-        nbreaks = int((1-start) / 0.02) + 1
+        nbreaks = int((1 - start) / 0.02) + 1
         fig, ax = plt.subplots()
         ax.hist(ami[:, 2], bins=np.linspace(start, 1, nbreaks), density=True)
         ax.xaxis.set_minor_locator(MultipleLocator(0.02))
@@ -232,7 +246,6 @@ class CorrelationExtraction:
         ax.set_ylabel('Density')
         plt.savefig(path, dpi=300, bbox_inches='tight')
         plt.close()
-
 
     # create subplot
     def custom_bar_subplot(self, cor_seq, ax, ind):
@@ -263,7 +276,6 @@ class CorrelationExtraction:
         ax.set_ylabel('Correlation')
         if ind == np.ceil(len(cor_seq) / 50) - 1:
             ax.set_xlabel('Residue ID')
-
 
     # custom bar plot
     def custom_bar_plot(self, hm, path):
