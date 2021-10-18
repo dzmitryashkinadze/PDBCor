@@ -43,10 +43,6 @@ class CorrelationExtraction:
         self.resid = []
         self.aaS = 0
         self.aaF = 0
-        try:
-            os.mkdir(self.savePath)
-        except:
-            pass
         self.nstates = nstates  # number of states
         # CREATE CORRELATION ESTIMATORS WITH STRUCTURE ANG CLUSTERING MODEL
         self.structure = PDBParser().get_structure('test', path)
@@ -89,6 +85,9 @@ class CorrelationExtraction:
         return ami_list, ami_matrix
 
     def calc_cor(self, graphics=True):
+    	# write readme file
+        shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'README.txt'), 
+        		 os.path.join(self.savePath, 'README.txt'))
         for chain in self.chains:
             chainPath = os.path.join(self.savePath, 'chain' + chain)
             try:
@@ -165,9 +164,6 @@ class CorrelationExtraction:
         self.write_correlations(dist_ami, ang_ami, best_clust, chainPath)
         # create a chimera executable
         self.color_pdb(best_clust, chainPath)
-        # write readme file
-        shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'README.txt'), 
-        		 os.path.join(chainPath, 'README.txt'))
         # plot everything
         if graphics:
             print('PLOTTING')
@@ -503,8 +499,15 @@ if __name__ == '__main__':
                         default=-1,
                         help='End of the loop')
     args = parser.parse_args()
+    # create correlations folder
+    corPath = os.path.join(os.path.dirname(args.bundle), 'correlations')
+    try:
+        os.mkdir(corPath)
+    except:
+        pass
+    # write parameters of the correlation extraction
     args_dict = vars(args)
-    args_path = os.path.join(os.path.dirname(args.bundle), 'args.json')
+    args_path = os.path.join(corPath, 'args.json')
     with open(args_path, 'w') as outfile:
         json.dump(args_dict, outfile)
     # correlation mode
