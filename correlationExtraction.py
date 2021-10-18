@@ -166,7 +166,8 @@ class CorrelationExtraction:
         # create a chimera executable
         self.color_pdb(best_clust, chainPath)
         # write readme file
-        shutil.copyfile('README.txt', os.path.join(chainPath, 'README.txt'))
+        shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'README.txt'), 
+        		 os.path.join(chainPath, 'README.txt'))
         # plot everything
         if graphics:
             print('PLOTTING')
