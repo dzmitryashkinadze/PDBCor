@@ -1,26 +1,22 @@
-# Clustering algorithm
-from sklearn.mixture import GaussianMixture
+import argparse
+import json
+import os
+import shutil
+from copy import copy
 
-# Import other libraries
+import matplotlib
+import numpy as np
+import pandas as pd
 from Bio.PDB.PDBParser import PDBParser  # pdb extraction
 from Bio.PDB.Polypeptide import is_aa
-from sklearn.metrics import adjusted_mutual_info_score
-import numpy as np
-import os
-import json
-import shutil
-import pandas as pd
-import argparse
-from copy import copy
-from tqdm import tqdm
-
-# Visualization
-import matplotlib
-
-matplotlib.use('agg')
 from matplotlib import pyplot as plt  # Plotting library
 from matplotlib.cm import get_cmap
 from matplotlib.ticker import FormatStrFormatter, MultipleLocator, AutoMinorLocator
+from sklearn.metrics import adjusted_mutual_info_score
+from sklearn.mixture import GaussianMixture
+from tqdm import tqdm
+
+matplotlib.use('agg')
 
 
 # correlation extraction wrapper class
@@ -86,7 +82,7 @@ class CorrelationExtraction:
 
     def calc_cor(self, graphics=True):
     	# write readme file
-        shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'README.txt'), 
+        shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'README.txt'),
         		 os.path.join(self.savePath, 'README.txt'))
         for chain in self.chains:
             chainPath = os.path.join(self.savePath, 'chain' + chain)
@@ -471,66 +467,3 @@ class AngleCor:
             clusters += [self.resid[i]]
             clusters += list(self.clust_aa(self.resid[i]))
         return np.array(clusters).reshape(-1, self.nConf + 1), self.banres
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Correlation extraction from multistate protein bundles')
-    parser.add_argument('bundle', type=str,
-                        help='protein bundle file path')
-    parser.add_argument('--nstates', type=int,
-                        default=2,
-                        help='number of states')
-    parser.add_argument('--graphics', type=bool,
-                        default=True,
-                        help='generate graphical output')
-    parser.add_argument('--mode', type=str,
-                        default='backbone',
-                        help='correlation mode')
-    parser.add_argument('--therm_fluct', type=float,
-                        default=0.5,
-                        help='Thermal fluctuation of distances in the protein bundle')
-    parser.add_argument('--therm_iter', type=int,
-                        default=5,
-                        help='Number of thermal simulations')
-    parser.add_argument('--loop_start', type=int,
-                        default=-1,
-                        help='Start of the loop')
-    parser.add_argument('--loop_end', type=int,
-                        default=-1,
-                        help='End of the loop')
-    args = parser.parse_args()
-    # create correlations folder
-    corPath = os.path.join(os.path.dirname(args.bundle), 'correlations')
-    try:
-        os.mkdir(corPath)
-    except:
-        pass
-    # write parameters of the correlation extraction
-    args_dict = vars(args)
-    args_path = os.path.join(corPath, 'args.json')
-    with open(args_path, 'w') as outfile:
-        json.dump(args_dict, outfile)
-    # correlation mode
-    if args.mode == 'backbone':
-        modes = ['backbone']
-    elif args.mode == 'sidechain':
-        modes = ['sidechain']
-    elif args.mode == 'combined':
-        modes = ['combined']
-    elif args.mode == 'full':
-        modes = ['backbone', 'sidechain', 'combined']
-    else:
-        parser.error('Mode has to be either backbone, sidechain, combined or full')
-    for mode in modes:
-        print('###############################################################################')
-        print('############################   {} CORRELATIONS   ########################'.format(mode.upper()))
-        print('###############################################################################')
-        print()
-        a = CorrelationExtraction(args.bundle,
-                                  mode=mode,
-                                  nstates=args.nstates,
-                                  therm_fluct=args.therm_fluct,
-                                  therm_iter=args.therm_iter,
-                                  loop_start=args.loop_start,
-                                  loop_end=args.loop_end)
-        a.calc_cor(graphics=args.graphics)
