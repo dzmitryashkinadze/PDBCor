@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<module type="PYTHON_MODULE" version="4">
+<module version="4">
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$">
-      <excludeFolder url="file://$MODULE_DIR$/dist" />
+      <sourceFolder url="file://$MODULE_DIR$/pdbcor" isTestSource="false" />
+      <excludeFolder url="file://$MODULE_DIR$/correlations" />
     </content>
-    <orderEntry type="jdk" jdkName="Poetry (PDBcor) (2)" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Poetry (PDBCor)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
 </module>
