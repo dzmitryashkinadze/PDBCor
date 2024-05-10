@@ -1,0 +1,56 @@
+[tool.poetry]
+name = "PDBCor"
+version = "1.3.1"
+description = "Extraction of correlated motion from multi-state PDB protein coordinates"
+authors = [
+    "Dzmitry Ashkinadze",
+    "Henry Wetton",
+    "Roland Riek",
+]
+maintainers = [
+    "Dzmitry Ashkinadze",
+    "Henry Wetton",
+]
+license = "AGPL-3.0-only"
+readme = "README.md"
+repository = "https://github.com/dzmitryashkinadze/PDBCor"
+keywords = ["protein", "scientific", "correlation", "clustering", "structural biology"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Scientific/Engineering :: Visualization",
+    "Typing :: Typed",
+]
+
+[tool.poetry.urls]
+"Publication" = "https://doi.org/10.1016/j.str.2021.12.002"
+
+[tool.poetry.dependencies]
+python = ">=3.9"
+numpy = "^1.26.4"
+pandas = "^2.2.1"
+scikit-learn = "^1.4.2"
+matplotlib = "^3.8.4"
+biopython = "^1.83"
+tqdm = "^4.66.2"
+rich = "^13.7.1"
+
+[tool.poetry.group.dev.dependencies]
+mypy = "^1.9.0"
+pandas-stubs = "^2.2.1"
+types-tqdm = "^4.66.0"
+
+[tool.poetry.scripts]
+pdbcor = "pdbcor:CLI.run"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
