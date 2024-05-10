@@ -49,7 +49,7 @@ a = CorrelationExtraction(
 )
 
 # Run calculation
-a.calc_cor()
+a.calculate_correlation()
 ```
 
 ## Produced output
