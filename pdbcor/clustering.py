@@ -6,7 +6,8 @@ from sklearn.mixture import GaussianMixture
 from Bio.PDB import is_aa
 from Bio.PDB.Structure import Structure
 from Bio.PDB.Residue import Residue
-from tqdm import tqdm
+
+from .console import console
 
 
 class DistanceCor:
@@ -146,8 +147,7 @@ class DistanceCor:
         self.resid = resid
         self.coord_matrix = self._residue_coords(chain)
         clusters = []
-        print("DISTANCE CLUSTERING PROCESS:")
-        for i in tqdm(range(len(self.resid))):
+        for i in console.tqdm(range(len(self.resid)), desc="Calculating clusters"):
             if self.resid[i] in self.banres:
                 clusters.append(self.resid[i])
                 clusters.extend(list(np.zeros(len(self.structure))))
@@ -284,8 +284,7 @@ class AngleCor:
         self.resid = resid
         # collect all clusterings
         clusters = []
-        print("ANGLE CLUSTERING PROCESS:")
-        for i in tqdm(range(len(self.resid))):
+        for i in console.tqdm(range(len(self.resid)), desc="Calculating clusters"):
             clusters.append(self.resid[i])
             clusters.extend(list(self._clust_aa(self.resid[i])))
         return np.array(clusters).reshape(-1, self.nConf + 1), self.banres

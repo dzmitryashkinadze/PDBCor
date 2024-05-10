@@ -3,6 +3,8 @@
 # Demo output
 correlations/
 correlations.zip
+correlations_*/
+correlations_*.zip
 
 ### VisualStudioCode template
 .vscode/*

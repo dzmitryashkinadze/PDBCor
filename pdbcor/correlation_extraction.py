@@ -8,16 +8,16 @@ import matplotlib
 import numpy as np
 import pandas as pd
 from Bio.PDB import MMCIFParser
-from Bio.PDB.PDBParser import PDBParser  # pdb extraction
+from Bio.PDB.PDBParser import PDBParser
 from Bio.PDB.Polypeptide import is_aa
-from matplotlib import pyplot as plt  # Plotting library
+from matplotlib import pyplot as plt
 from matplotlib.cm import get_cmap
 from matplotlib.ticker import FormatStrFormatter, MultipleLocator, AutoMinorLocator
 from sklearn.metrics import adjusted_mutual_info_score  # type: ignore
 from sklearn.mixture import GaussianMixture  # type: ignore
-from tqdm import tqdm
 
 from .clustering import DistanceCor, AngleCor
+from .console import console
 
 matplotlib.use("agg")
 
@@ -29,6 +29,7 @@ class CorrelationExtraction:
         self,
         path: str | os.PathLike,
         input_file_format: Optional[str] = None,
+        output_directory: Optional[str | os.PathLike] = None,
         mode: str = "backbone",
         nstates: int = 2,
         therm_fluct: float = 0.5,
@@ -37,11 +38,15 @@ class CorrelationExtraction:
         loop_end: int = -1,
     ):
         """Initialize the `CorrelationExtraction` object and clustering estimators."""
+        console.h1("PDBCor")
+
         # HYPERVARIABLES
-        directory = "correlations"
         self.mode = mode
-        self.savePath = os.path.join(os.path.dirname(path), directory)
         self.PDBfilename = os.path.basename(path)
+        if output_directory is None or output_directory == "":
+            output_directory = f"correlations_{os.path.splitext(self.PDBfilename)[0]}"
+        self.savePath = os.path.join(os.path.dirname(path), output_directory)
+        os.makedirs(self.savePath, exist_ok=True)
         self.therm_iter = therm_iter
         self.resid = []
         self.aaS = 0
@@ -49,23 +54,37 @@ class CorrelationExtraction:
         self.nstates = nstates  # number of states
 
         # CREATE CORRELATION ESTIMATORS WITH STRUCTURE ANG CLUSTERING MODEL
+        console.h2("Setup")
+        console.h3("Structure file import")
         if input_file_format is None:
-            structure_parser = (
-                PDBParser()
-                if os.path.splitext(self.PDBfilename)[1] == ".pdb"
-                else MMCIFParser()
-            )
+            if os.path.splitext(self.PDBfilename)[1] == ".pdb":
+                console.print("PDB format identified.")
+                structure_parser = PDBParser()
+            else:
+                console.print("Assuming PDBx/mmCIF format.")
+                structure_parser = MMCIFParser()
         elif input_file_format.lower() == "mmcif":
+            console.print("PDBx/mmCIF format set via CLI.")
             structure_parser = MMCIFParser()
         elif input_file_format.lower() == "pdb":
+            console.print("PDB format set via CLI.")
             structure_parser = PDBParser()
         else:
             raise ValueError(f"Invalid structure file format: {input_file_format}")
+        console.print("Parsing structure file...")
         self.structure = structure_parser.get_structure("test", path)
         self.chain_ids = [chain.id for chain in self.structure[0].get_chains()]
+        console.print(
+            "Structure parsed successfully "
+            f"(identified {len(self.chain_ids)} chain{'' if len(self.chain_ids) == 1 else 's'})."
+        )
+
+        console.h3("Clustering model initialization")
+        console.print("Initializing GMM...")
         clust_model = GaussianMixture(
             n_components=self.nstates, n_init=25, covariance_type="diag"
         )
+        console.print("Initializing cluster calculators...")
         self.distCor = DistanceCor(
             self.structure,
             mode,
@@ -76,6 +95,7 @@ class CorrelationExtraction:
             loop_end,
         )
         self.angCor = AngleCor(self.structure, mode, nstates, clust_model)
+        console.print("Setup complete.", style="green")
 
     def _calc_ami(
         self, clusters: np.ndarray, banres: List
@@ -92,7 +112,9 @@ class CorrelationExtraction:
         """
         # Calculate mutual information
         ami_list = []
-        for i in tqdm(range(clusters.shape[0])):
+        for i in console.tqdm(
+            range(clusters.shape[0]), desc="Extracting mutual information"
+        ):
             for j in range(i + 1, clusters.shape[0]):
                 cor = adjusted_mutual_info_score(clusters[i, 1:], clusters[j, 1:])
                 ami_list.extend(list(clusters[i, :1]))  # 1st column = residue label
@@ -147,13 +169,7 @@ class CorrelationExtraction:
                     self.resid.append(res.id[1])
             self.aaS = min(self.resid)
             self.aaF = max(self.resid)
-            print()
-            print()
-            print(
-                "################################################################################\n"
-                f"#################################   CHAIN {chain}   #################################\n"
-                "################################################################################"
-            )
+            console.h2(f"Chain {chain}")
             self._calc_cor_chain(chain, chain_path, self.resid, graphics)
 
     def _calc_cor_chain(
@@ -171,26 +187,16 @@ class CorrelationExtraction:
         #. Output data & generate figures.
         """
         # extract angle correlation matrices
-        print()
-        print()
-        print(
-            "#############################   ANGLE CLUSTERING   ############################"
-        )
+        console.h3("Angle clustering")
         ang_clusters, ang_banres = self.angCor.clust_cor(chain, resid)
-        print("ANGULAR MUTUAL INFORMATION EXTRACTION:")
         ang_ami, ang_hm = self._calc_ami(ang_clusters, ang_banres)
         # Run a series of thermally corrected distance correlation extractions
-        print()
-        print()
-        print(
-            "############################   DISTANCE CLUSTERING   ##########################"
-        )
         dist_ami = None
         dist_hm = None
         dist_clusters = None
         for i in range(self.therm_iter):
+            console.h3(f"Distance clustering (run {i+1} of {self.therm_iter})")
             dist_clusters, dist_banres = self.distCor.clust_cor(chain, resid)
-            print("DISTANCE MUTUAL INFORMATION EXTRACTION, RUN {}:".format(i + 1))
             dist_ami_loc, dist_hm_loc = self._calc_ami(dist_clusters, dist_banres)
             if i == 0:
                 dist_ami = dist_ami_loc
@@ -212,12 +218,8 @@ class CorrelationExtraction:
         best_res = [i for i in range(len(ami_sum)) if ami_sum[i] == np.nanmax(ami_sum)]
         best_res = best_res[0]
         best_clust = dist_clusters[best_res, 1:]
-        print()
-        print()
-        print(
-            "############################       FINALIZING       ###########################"
-        )
-        print("PROCESSING CORRELATION MATRICES")
+        console.h3("Finalizing")
+        console.print("Processing correlation matrices...")
         df = pd.DataFrame(ang_ami, columns=["ID1", "ID2", "Correlation"])
         df["ID1"] = df["ID1"].astype("int")
         df["ID2"] = df["ID2"].astype("int")
@@ -228,11 +230,12 @@ class CorrelationExtraction:
         df.to_csv(chainPath + "/dist_ami_" + self.mode + ".csv", index=False)
         # write correlation parameters
         self.write_correlations(dist_ami, ang_ami, best_clust, chainPath)
-        # create a chimera executable
-        self.color_pdb(best_clust, chainPath)
+        # create visualisation scripts
+        self.write_chimera_script(best_clust, chainPath)
+        self.write_pymol_script(best_clust, chainPath)
         # plot everything
         if graphics:
-            print("PLOTTING")
+            console.print("Plotting...")
             self.plot_heatmaps(
                 dist_hm, os.path.join(chainPath, "heatmap_dist_" + self.mode + ".png")
             )
@@ -252,8 +255,7 @@ class CorrelationExtraction:
                 ang_hm, os.path.join(chainPath, "seq_ang_" + self.mode + ".png")
             )
             shutil.make_archive(self.savePath, "zip", self.savePath + "/")
-        print("DONE")
-        print()
+        console.print("Done!", style="green")
 
     def write_correlations(
         self,
@@ -288,13 +290,23 @@ class CorrelationExtraction:
             "dist_cor": np.around(dist_cor, 4),
             "ang_cor": np.around(ang_cor, 4),
         }
-        with open(os.path.join(path, "results.json"), "w") as outfile:
-            json.dump(result_dist, outfile)
+        with open(os.path.join(path, f"results_{self.mode}.json"), "w") as outfile:
+            json.dump(
+                {
+                    "distribution": result_dist,
+                    "cluster_assignment": {
+                        i + 1: int(best_clust[i]) for i in range(len(self.structure))
+                    },
+                },
+                outfile,
+            )
 
-    def color_pdb(self, best_clust: np.ndarray, path: str | os.PathLike) -> None:
+    def write_chimera_script(
+        self, best_clust: np.ndarray, path: str | os.PathLike
+    ) -> None:
         """Construct a Chimera script to view the calculated states in color."""
         state_color = ["#00FFFF", "#00008b", "#FF00FF", "#FFFF00", "#000000"]
-        chimera_path = os.path.join(path, "bundle_vis_" + self.mode + ".py")
+        chimera_path = os.path.join(path, "bundle_vis_chimera_" + self.mode + ".py")
         with open(chimera_path, "w") as f:
             f.write("from chimera import runCommand as rc\n")
             f.write('rc("open ../../{}")\n'.format(self.PDBfilename))
@@ -308,6 +320,25 @@ class CorrelationExtraction:
                         state_color[int(best_clust[i])], int(i + 1)
                     )
                 )
+
+    def write_pymol_script(
+        self, best_clust: np.ndarray, path: str | os.PathLike
+    ) -> None:
+        """Construct a PyMOL script to view the calculated clusters in separate colours"""
+        state_color = ["0x00FFFF", "0x00008b", "0xFF00FF", "0xFFFF00", "0x000000"]
+        pymol_path = os.path.join(path, "bundle_vis_pymol_" + self.mode + ".pml")
+        with open(pymol_path, "w") as f:
+            f.write(f"load ../../{self.PDBfilename}\n")
+            f.write("bg_color white\n")
+            f.write("hide\n")
+            f.write("show ribbon\n")
+            f.write("set all_states, true\n")
+            f.writelines(
+                [
+                    f"set ribbon_color, {state_color[int(best_clust[i])]}, all, {i+1}\n"
+                    for i in range(len(self.structure))
+                ]
+            )
 
     def plot_heatmaps(self, hm: np.ndarray, path: str | os.PathLike) -> None:
         """Plot the correlation matrix as a heatmap."""
