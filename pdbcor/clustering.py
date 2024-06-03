@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from typing import Tuple, List, Union, Optional
 
 import numpy as np
+from matplotlib import pyplot as plt
 from sklearn.mixture import GaussianMixture  # type: ignore
 from Bio.PDB import is_aa
 from Bio.PDB.Structure import Structure
@@ -208,8 +209,9 @@ class DistanceClusterCalculator(ClusterCalculator):
             axis=0,
         )
         figs = self.io.draw_clustering_results(self.coord_matrix, clusters, chain)
-        for f in figs:
-            f.close()
+        if figs is not None:
+            for f in figs:
+                plt.close(f)
         return clusters, self.banres
 
 
@@ -401,6 +403,7 @@ class AngleClusterCalculator(ClusterCalculator):
         )
         angles_to_draw = np.stack([self._generate_aa_angles(r) for r in self.resid])
         figs = self.io.draw_clustering_results(angles_to_draw, clusters, chain)
-        for f in figs:
-            f.close()
+        if figs is not None:
+            for f in figs:
+                plt.close(f)
         return clusters, self.banres
