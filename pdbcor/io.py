@@ -11,7 +11,7 @@ from typing import Any, TYPE_CHECKING, Optional, Union, SupportsFloat, Sequence
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
-from matplotlib.cm import get_cmap
+from matplotlib.pyplot import get_cmap
 from matplotlib.ticker import MultipleLocator, AutoMinorLocator, FormatStrFormatter
 
 from pydantic import BaseModel
