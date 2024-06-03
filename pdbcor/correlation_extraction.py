@@ -74,7 +74,7 @@ class CorrelationExtraction:
         console.h3("Structure file import")
         structure_parser: Union[MMCIFParser, PDBParser]  # for mypy
         if input_file_format is None:
-            if os.path.splitext(self.pdb_file_name)[1] == ".pdb":
+            if os.path.splitext(self.pdb_file_name)[1] in {".pdb", ".ent"}:
                 console.print("PDB format identified.")
                 structure_parser = PDBParser()
             else:
@@ -89,7 +89,9 @@ class CorrelationExtraction:
         else:
             raise ValueError(f"Invalid structure file format: {input_file_format}")
         console.print("Parsing structure file...")
-        self.structure = structure_parser.get_structure("test", pdb_file_path)
+        self.structure = structure_parser.get_structure(
+            os.path.splitext(self.pdb_file_name)[0], pdb_file_path
+        )
         self.chain_ids = [chain.id for chain in self.structure[0].get_chains()]
         console.print(
             "Structure parsed successfully "
