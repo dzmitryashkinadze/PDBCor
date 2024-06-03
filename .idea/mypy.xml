@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="MypyConfigService">
-    <option name="customMypyPath" value="$PROJECT_DIR$/../.cache/pypoetry/virtualenvs/pdbcor-WSJWvpTR-py3.11/bin/mypy" />
+    <option name="customMypyPath" value="$mypyExecDir$/mypy" />
+    <option name="mypyArguments" value="--exclude 'correlations_*/'" />
   </component>
 </project>

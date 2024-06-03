@@ -1,8 +1,9 @@
 import sys
+from warnings import warn
 
 from rich.console import Console as RichConsole
 from rich.markdown import Markdown
-from tqdm import tqdm as tqdm_base
+from tqdm import tqdm as tqdm_base, trange as trange_base
 
 
 class Console(RichConsole):
@@ -16,6 +17,9 @@ class Console(RichConsole):
     def print(self, *args, **kwargs):
         if not self.quiet:
             super().print(*args, **kwargs)
+
+    def warn(self, *args, **kwargs):
+        warn(*args, **kwargs)
 
     def _h(self, text, level):
         """Print header with given level (e.g. `h1` for `level = 1`)."""
@@ -36,20 +40,25 @@ class Console(RichConsole):
     def h4(self, text):
         self._h(text, 4)
 
-    def tqdm(self, *args, **kwargs):
-        return self._Tqdm(*args, outer=self, **kwargs)
+    tqdm_default_kwargs = {
+        "file": sys.stdout,
+        "disable": None,
+    }
 
     class _Tqdm(tqdm_base):
-        kwargs_default = {
-            "file": sys.stdout,
-            "disable": None,
-        }
-
-        def __init__(self, *args, outer=None, **kwargs):
+        def __init__(self, *args, outer: "Console", **kwargs):
             if outer is not None and outer.quiet:
                 kwargs.update(disable=True)
 
-            super().__init__(*args, **{**self.kwargs_default, **kwargs})
+            super().__init__(*args, **{**outer.tqdm_default_kwargs, **kwargs})
+
+    def tqdm(self, *args, **kwargs):
+        return self._Tqdm(*args, outer=self, **kwargs)
+
+    def trange(self, *args, **kwargs):
+        if self.quiet:
+            kwargs.update(disable=True)
+        return trange_base(*args, **{**self.tqdm_default_kwargs, **kwargs})
 
 
 console = Console()

@@ -4,6 +4,7 @@ import os
 
 from .console import console
 from .correlation_extraction import CorrelationExtraction
+from .io import CorrelationExtractionIOParams
 
 
 class CLI:
@@ -23,11 +24,26 @@ class CLI:
 
         console.set_quiet(quiet=self.args.quiet)
 
-        self.modes = (
+        self.residue_subsets = (
             ["backbone", "sidechain", "combined"]
-            if self.args.mode == "full"
-            else [self.args.mode]
+            if self.args.residue_subset == "full"
+            else [self.args.residue_subset]
         )
+
+        io_params = CorrelationExtractionIOParams(
+            **{
+                "create_plots": self.args.create_plots,
+                "create_archive": self.args.create_archive,
+                "create_vis_scripts": self.args.create_vis_scripts,
+                "create_cluster_plots": self.args.create_cluster_plots,
+            }
+        )
+
+        if io_params.create_cluster_plots and not io_params.create_plots:
+            console.warn(
+                "Incompatible CLI options --no-plots and --draw-clusters passed - ignoring --draw-clusters."
+            )
+            io_params.create_cluster_plots = False
 
         self.extractors = [
             CorrelationExtraction(
@@ -36,25 +52,28 @@ class CLI:
                     self.args.format if len(self.args.format) > 0 else None
                 ),
                 output_directory=self.args.output,
-                mode=mode,
+                io_params=io_params,
+                residue_subset=residue_subset,
+                features=self.args.features,
                 nstates=self.args.num_states,
                 therm_fluct=self.args.therm_fluct,
                 therm_iter=self.args.therm_iter,
                 loop_start=self.args.loop[0],
                 loop_end=self.args.loop[1],
+                fast=self.args.fast,
             )
-            for mode in self.modes
+            for residue_subset in self.residue_subsets
         ]
 
         args_dict = vars(self.args)
-        args_path = os.path.join(self.extractors[0].savePath, "args.json")
+        args_path = os.path.join(self.extractors[0].io.output_parent_path, "args.json")
         with open(args_path, "w") as outfile:
             json.dump(args_dict, outfile)
 
     def calculate_correlation(self):
-        """Run the correlation extraction for each enabled mode."""
-        for mode, extractor in zip(self.modes, self.extractors):
-            extractor.calculate_correlation(graphics=self.args.graphics)
+        """Run the correlation extraction for each enabled subset of residue."""
+        for residue_subset, extractor in zip(self.residue_subsets, self.extractors):
+            extractor.calculate_correlation()
 
     @classmethod
     def run(cls):
@@ -90,10 +109,28 @@ class CLI:
             help='filename for output directory (default: "correlations_<name of structure file>")',
         )
         io_args.add_argument(
-            "--nographics",
-            dest="graphics",
+            "--no-plots",
+            dest="create_plots",
             action="store_false",
-            help="do not generate graphical output",
+            help="do not plot any graphical output",
+        )
+        io_args.add_argument(
+            "--create-archive",
+            dest="create_archive",
+            action="store_true",
+            help="create .zip archive of output directory",
+        )
+        io_args.add_argument(
+            "--no-vis",
+            dest="create_vis_scripts",
+            action="store_false",
+            help="do not create scripts for visualisation in PyMOL/Chimera",
+        )
+        io_args.add_argument(
+            "--draw-clusters",
+            dest="create_cluster_plots",
+            action="store_true",
+            help="create plots of clustering results",
         )
         io_args.add_argument(
             "-q",
@@ -112,13 +149,26 @@ class CLI:
             help="number of states (default: 2)",
         )
         corr_args.add_argument(
-            "-m",
-            "--mode",
-            dest="mode",
+            "--residue-subset",
+            dest="residue_subset",
             type=str,
             default="backbone",
-            help="correlation mode (default: backbone)",
+            help="subset of residue atoms used for clustering, or 'full' to iterate over each (default: backbone)",
             choices=["backbone", "sidechain", "combined", "full"],
+        )
+        corr_args.add_argument(
+            "--features",
+            dest="features",
+            type=str,
+            default="both",
+            help="features used for clustering (default: both)",
+            choices=["distance", "angle", "both"],
+        )
+        corr_args.add_argument(
+            "--fast",
+            dest="fast",
+            action="store_true",
+            help="run in fast mode (see documentation for details)",
         )
         corr_args.add_argument(
             "-i",
