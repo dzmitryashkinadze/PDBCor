@@ -225,6 +225,12 @@ class CorrelationExtraction:
             for res in self.structure[0][chain].get_residues():
                 if is_aa(res, standard=True):
                     self.resid.append(res.id[1])
+            if len(self.resid) == 0:
+                console.warn(
+                    f"No valid (AA) residues identified for chain {chain} of file {self.pdb_file_path}. "
+                    "Skipping this chain."
+                )
+                continue
             self.aaS = min(self.resid)
             self.aaF = max(self.resid)
             console.h2(f"Chain {chain}")
