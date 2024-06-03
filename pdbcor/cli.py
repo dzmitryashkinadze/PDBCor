@@ -54,7 +54,10 @@ class CLI:
     def calculate_correlation(self):
         """Run the correlation extraction for each enabled mode."""
         for mode, extractor in zip(self.modes, self.extractors):
-            extractor.calculate_correlation(graphics=self.args.graphics)
+            if self.args.draw_angles_only:
+                extractor.draw_angle_clusters()
+            else:
+                extractor.calculate_correlation(graphics=self.args.graphics)
 
     @classmethod
     def run(cls):
@@ -70,6 +73,11 @@ class CLI:
         )
 
         parser.add_argument("bundle", type=str, help="protein bundle file path")
+        parser.add_argument(
+            "--draw-angles-only",
+            action="store_true",
+            help="draw Ramachandran-like plot of angle clusters, then exit",
+        )
 
         io_args = parser.add_argument_group("input/output settings")
         io_args.add_argument(

@@ -2,7 +2,7 @@ import json
 import os
 import shutil
 from copy import copy
-from typing import List, Tuple, Optional
+from typing import List, Optional
 
 import matplotlib
 import numpy as np
@@ -16,7 +16,7 @@ from matplotlib.ticker import FormatStrFormatter, MultipleLocator, AutoMinorLoca
 from sklearn.metrics import adjusted_mutual_info_score  # type: ignore
 from sklearn.mixture import GaussianMixture  # type: ignore
 
-from .clustering import DistanceCor, AngleCor
+from .clustering import DistanceClusterCalculator, AngleClusterCalculator
 from .console import console
 
 matplotlib.use("agg")
@@ -85,7 +85,7 @@ class CorrelationExtraction:
             n_components=self.nstates, n_init=25, covariance_type="diag"
         )
         console.print("Initializing cluster calculators...")
-        self.distCor = DistanceCor(
+        self.dist_clust_calc = DistanceClusterCalculator(
             self.structure,
             mode,
             nstates,
@@ -94,47 +94,62 @@ class CorrelationExtraction:
             loop_start,
             loop_end,
         )
-        self.angCor = AngleCor(self.structure, mode, nstates, clust_model)
+        self.ang_clust_calc = AngleClusterCalculator(
+            self.structure, mode, nstates, clust_model
+        )
         console.print("Setup complete.", style="green")
 
-    def _calc_ami(
-        self, clusters: np.ndarray, banres: List
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    def _calc_ami(self, clusters: np.ndarray, resid: List[int]) -> np.ndarray:
         """
-        Calculate adjusted mutual information between 2 clustering sets in the form of a correlation matrix.
+        Calculate adjusted mutual information between 2 clustering sets in the form of a correlation list.
 
         Uses `self.aaS`/`self.aaF` (set by `self.calculate_correlation()`)
         to specify the shape of the correlation matrix.
 
-        :returns: Tuple of two `ndarray` s containing AMI values
-        in pairwise list form with rows `[ resi_i, resi_j, ami_i_j ]`,
-        and as a matrix
+        :returns: `ndarray` containing AMI values in pairwise list form with rows `[ resi_i, resi_j, ami_i_j ]`
         """
-        # Calculate mutual information
-        ami_list = []
-        for i in console.tqdm(
-            range(clusters.shape[0]), desc="Extracting mutual information"
-        ):
-            for j in range(i + 1, clusters.shape[0]):
-                cor = adjusted_mutual_info_score(clusters[i, 1:], clusters[j, 1:])
-                ami_list.extend(list(clusters[i, :1]))  # 1st column = residue label
-                ami_list.extend(list(clusters[j, :1]))  # TODO: replace :1 with 0?
-                ami_list.append(cor)
-        ami_list = np.array(ami_list).reshape(
-            -1, 3
-        )  # -> ndarray with rows [ resi_i, resi_j, ami_i_j ]
+        return np.vstack(
+            [
+                [
+                    resid[i],  # residue ID i
+                    resid[j],  # residue ID j
+                    adjusted_mutual_info_score(
+                        clusters[i, :], clusters[j, :]
+                    ),  # correlation
+                ]
+                for i in console.tqdm(
+                    range(clusters.shape[0]), desc="Extracting mutual information"
+                )
+                for j in range(i + 1, clusters.shape[0])
+            ]
+        )
 
-        # construct correlation matrix
+    def _ami_list_to_matrix(
+        self, ami_list: np.ndarray, banres: List[int]
+    ) -> np.ndarray:
+        """
+        Convert list of correlations into matrix form.
+
+        Uses `self.aaS`/`self.aaF` (set by `self.calculate_correlation()`)
+        to specify the shape of the correlation matrix.
+
+        :param ami_list: `ndarray` containing AMI values in pairwise list form with rows `[ resi_i, resi_j, ami_i_j ]`
+        :param banres: list of excluded residues (set to `NaN`)
+        :returns: `ndarray` containing correlations as a 2D matrix
+        """
+
         ami_matrix = np.zeros(
             (int(self.aaF - self.aaS + 1), int(self.aaF - self.aaS + 1))
         )
+
         for i in range(self.aaS, int(self.aaF + 1)):
             if i not in self.resid or i in banres:
                 for j in range(self.aaS, int(self.aaF + 1)):
-                    ami_matrix[int(i - self.aaS), int(j - self.aaS)] = None
-                    ami_matrix[int(j - self.aaS), int(i - self.aaS)] = None
+                    ami_matrix[int(i - self.aaS), int(j - self.aaS)] = np.nan
+                    ami_matrix[int(j - self.aaS), int(i - self.aaS)] = np.nan
             else:
                 ami_matrix[int(i - self.aaS), int(i - self.aaS)] = 1
+
         for i in range(ami_list.shape[0]):
             ami_matrix[
                 int(ami_list[i, 0] - self.aaS), int(ami_list[i, 1] - self.aaS)
@@ -143,7 +158,7 @@ class CorrelationExtraction:
                 int(ami_list[i, 1] - self.aaS), int(ami_list[i, 0] - self.aaS)
             ] = ami_list[i, 2]
 
-        return ami_list, ami_matrix
+        return ami_matrix
 
     def calculate_correlation(self, graphics: bool = True) -> None:
         """
@@ -172,6 +187,27 @@ class CorrelationExtraction:
             console.h2(f"Chain {chain}")
             self._calc_cor_chain(chain, chain_path, self.resid, graphics)
 
+    def draw_angle_clusters(self):
+        """
+        Cluster each residue using data for two angles,
+        then plot the angles over all conformers,
+        colour-coded by cluster assignment.
+
+        Serves as a wrapper around `clustering.AngleClusterCalculator.draw_clusters()`
+        to iterate over all chains and provide a sensible output directory.
+
+        Angles clustered/plotted by default:
+
+        - `mode == "backbone"` or `mode == "combined"`: phi, psi
+        - `mode == "sidechain"`: chi1, chi2
+        """
+        for chain in self.chain_ids:
+            chain_path = os.path.join(self.savePath, "chain" + chain)
+            os.makedirs(chain_path, exist_ok=True)
+            self.ang_clust_calc.draw_clusters(
+                chain_id=chain, output_dir=os.path.join(chain_path, "angle_clusters")
+            )
+
     def _calc_cor_chain(
         self, chain: str, chainPath: str | os.PathLike, resid: List[int], graphics: bool
     ) -> None:
@@ -188,16 +224,18 @@ class CorrelationExtraction:
         """
         # extract angle correlation matrices
         console.h3("Angle clustering")
-        ang_clusters, ang_banres = self.angCor.clust_cor(chain, resid)
-        ang_ami, ang_hm = self._calc_ami(ang_clusters, ang_banres)
+        ang_clusters, ang_banres = self.ang_clust_calc.cluster(chain, resid)
+        ang_ami = self._calc_ami(ang_clusters, resid)
+        ang_hm = self._ami_list_to_matrix(ang_ami, ang_banres)
         # Run a series of thermally corrected distance correlation extractions
         dist_ami = None
         dist_hm = None
         dist_clusters = None
         for i in range(self.therm_iter):
             console.h3(f"Distance clustering (run {i+1} of {self.therm_iter})")
-            dist_clusters, dist_banres = self.distCor.clust_cor(chain, resid)
-            dist_ami_loc, dist_hm_loc = self._calc_ami(dist_clusters, dist_banres)
+            dist_clusters, dist_banres = self.dist_clust_calc.cluster(chain, resid)
+            dist_ami_loc = self._calc_ami(dist_clusters, resid)
+            dist_hm_loc = self._ami_list_to_matrix(dist_ami_loc, dist_banres)
             if i == 0:
                 dist_ami = dist_ami_loc
                 dist_hm = dist_hm_loc
@@ -217,7 +255,7 @@ class CorrelationExtraction:
         ami_sum = np.nansum(dist_hm, axis=1)
         best_res = [i for i in range(len(ami_sum)) if ami_sum[i] == np.nanmax(ami_sum)]
         best_res = best_res[0]
-        best_clust = dist_clusters[best_res, 1:]
+        best_clust = dist_clusters[best_res, :]
         console.h3("Finalizing")
         console.print("Processing correlation matrices...")
         df = pd.DataFrame(ang_ami, columns=["ID1", "ID2", "Correlation"])

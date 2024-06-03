@@ -1,6 +1,10 @@
-from typing import Tuple, List
+import os
+import re
+from abc import ABC, abstractmethod
+from typing import Tuple, List, Optional
 
 import Bio
+import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.mixture import GaussianMixture
 from Bio.PDB import is_aa
@@ -10,7 +14,35 @@ from Bio.PDB.Residue import Residue
 from .console import console
 
 
-class DistanceCor:
+class ClusterCalculator(ABC):
+    @abstractmethod
+    def _clust_aa(self, aa_id: int, prob=False) -> np.ndarray:
+        """
+        Perform clustering within a single residue.
+
+        If `prob`, return cluster probabilities, else return assignments.
+        """
+        return np.empty((0, 0) if prob else (0,))
+
+    @abstractmethod
+    def cluster(
+        self, chain: str, resid: List[int], prob=False
+    ) -> Tuple[np.ndarray, List[int]]:
+        """
+        Get clustering matrix for the specified chain by calling `self._clust_aa()` on each amino acid.
+
+        The returned array of cluster indices has the shape (number of residues, number of conformers).
+        Alongside this, a list of excluded residues is returned.
+
+        If `prob`, the weights of each cluster are returned instead of assignments.
+        The returned array has the shape
+        (number of conformers, number of residues) if `prob` is `False`
+        and (number of conformers, number of residues, number of clusters) otherwise.
+        """
+        return np.empty((0, 0, 0) if prob else (0, 0)), []
+
+
+class DistanceClusterCalculator(ClusterCalculator):
     """Distance-based clustering."""
 
     def __init__(
@@ -104,7 +136,7 @@ class DistanceCor:
             coord_list.append(model_coord)
         return np.array(coord_list).reshape(len(self.structure), len(self.resid), 3)
 
-    def _clust_aa(self, ind: int) -> List[int]:
+    def _clust_aa(self, ind: int, prob=False) -> List[int]:
         """
         Cluster conformers according to the distances between the specified residue and all other residues.
 
@@ -133,32 +165,42 @@ class DistanceCor:
         features = features.reshape(len(self.structure), -1)
 
         # clustering
-        return list(self.clust_model.fit_predict(features))
+        if prob:
+            self.clust_model.fit(features)
+            return self.clust_model.predict_proba(features)
+        else:
+            return self.clust_model.fit_predict(features)
 
-    def clust_cor(self, chain: str, resid: List[int]) -> Tuple[np.ndarray, List[int]]:
+    def cluster(
+        self, chain: str, resid: List[int], prob=False
+    ) -> Tuple[np.ndarray, List[int]]:
         """
         Get clustering matrix for the specified chain by calling `self._clust_aa()` on each amino acid.
 
         Residues in `self.banres` are assigned 0 for each conformer.
 
-        The returned array of clusters has the shape (number of residues, number of conformers + 1).
-        The first column contains residue numbers, all others contain cluster indices.
+        The returned array has the shape
+        (number of residues, number of conformers) if `prob` is `False`
+        and (number of residues, number of conformers, number of clusters) otherwise.
         """
         self.resid = resid
         self.coord_matrix = self._residue_coords(chain)
-        clusters = []
-        for i in console.tqdm(range(len(self.resid)), desc="Calculating clusters"):
-            if self.resid[i] in self.banres:
-                clusters.append(self.resid[i])
-                clusters.extend(list(np.zeros(len(self.structure))))
-            else:
-                clusters.append(self.resid[i])
-                clusters.extend(self._clust_aa(i))
-        return np.array(clusters).reshape(-1, len(self.structure) + 1), self.banres
+        clusters = np.stack(
+            [
+                self._clust_aa(i, prob=prob)
+                if self.resid[i] not in self.banres
+                else np.zeros(len(self.structure))
+                for i in console.tqdm(
+                    range(len(self.resid)), desc="Calculating clusters"
+                )
+            ],
+            axis=0,
+        )
+        return clusters, self.banres
 
 
 # angle correlations estimator
-class AngleCor:
+class AngleClusterCalculator(ClusterCalculator):
     """Angle-based clustering."""
 
     def __init__(
@@ -181,7 +223,7 @@ class AngleCor:
         """
         # HYPERVARIABLES
         self.nstates = nstates  # number of states
-        self.clustModel = clust_model
+        self.clust_model = clust_model
         self.structure = structure
         self.nConf = len(self.structure)  # number of PDB models
         self.structure.atom_to_internal_coordinates()
@@ -197,7 +239,17 @@ class AngleCor:
         self.resid = []
         self.angle_data = np.empty((0, 0))
 
-    def _all_residues_angles(self, chainID: str) -> np.ndarray:
+    @staticmethod
+    def _angle_to_tex(angle):
+        """Represent an angle name in TeX algebra notation."""
+        angle_re = r"(?P<angle_name>[a-z]+)(?P<angle_index>[0-9]+)?"
+        angle_match = re.match(angle_re, angle.lower())
+        if angle_match.group("angle_index") is None:
+            return f"\\{angle_match.group('angle_name')}"
+        else:
+            return f"\\{angle_match.group('angle_name')}_{{{angle_match.group('angle_index')}}}"
+
+    def _all_residues_angles(self, chain_id: str) -> np.ndarray:
         """
         Get angle data for all residues in the specified chain.
 
@@ -206,7 +258,7 @@ class AngleCor:
         """
         angles = []
         for model in self.structure.get_models():
-            chain = model[chainID]
+            chain = model[chain_id]
             for res in chain.get_residues():
                 if is_aa(res, standard=True):
                     if res.internal_coord and res.get_resname() not in self.bannedRes:
@@ -252,24 +304,30 @@ class AngleCor:
         ang_shift = np.array([v - 360 if v > 360 else v for v in ang_shift])
         return ang_shift - np.mean(ang_shift)
 
-    def _clust_aa(self, aa_id: int) -> np.ndarray:
+    def _clust_aa(self, aa_id: int, prob=False) -> np.ndarray:
         """
         Cluster conformers according to the distribution of angles within a single residue.
 
         Angles are calculated via `self._single_residue_angles()` and normalized via `self._correct_cyclic_angle()`.
         Amino acids containing no angle data are added to `self.banres` and a zero array is returned.
         """
-        aa_data = self._single_residue_angles(aa_id)
-        if aa_data.shape == (0, 5):
+        features = self._single_residue_angles(aa_id)
+        if features.shape == (0, 5):
             self.banres.append(aa_id)
             return np.zeros(self.nConf)
         # correct the cyclic angle coordinates
         for i in range(len(self.angleDict)):
-            aa_data[:, i] = self.correct_cyclic_angle(aa_data[:, i])
+            features[:, i] = self.correct_cyclic_angle(features[:, i])
         # CLUSTERING
-        return self.clustModel.fit_predict(aa_data)
+        if prob:
+            self.clust_model.fit(features)
+            return self.clust_model.predict_proba(features)
+        else:
+            return self.clust_model.fit_predict(features)
 
-    def clust_cor(self, chain: str, resid: List[int]) -> Tuple[np.ndarray, List[int]]:
+    def cluster(
+        self, chain: str, resid: List[int], prob=False
+    ) -> Tuple[np.ndarray, List[int]]:
         """
         Get clustering matrix for the specified chain by calling `self._clust_aa()` on each amino acid.
 
@@ -277,14 +335,127 @@ class AngleCor:
         however they are not treated differently here,
         as `self._clust_aa()` automatically identifies them and returns a zero array.
 
-        The returned array of clusters has the shape (number of residues, number of conformers + 1).
-        The first column contains residue numbers, all others contain cluster indices.
+        The returned array has the shape
+        (number of residues, number of conformers) if `prob` is `False`
+        and (number of residues, number of conformers, number of clusters) otherwise.
         """
         self.angle_data = self._all_residues_angles(chain)
         self.resid = resid
         # collect all clusterings
-        clusters = []
-        for i in console.tqdm(range(len(self.resid)), desc="Calculating clusters"):
-            clusters.append(self.resid[i])
-            clusters.extend(list(self._clust_aa(self.resid[i])))
-        return np.array(clusters).reshape(-1, self.nConf + 1), self.banres
+        clusters = np.stack(
+            [
+                self._clust_aa(r, prob=prob)
+                for r in console.tqdm(self.resid, desc="Calculating clusters")
+            ],
+            axis=0,
+        )
+        return clusters, self.banres
+
+    def _draw_clusters_single_aa(
+        self, aa_id: int, ax: Optional[plt.Axes] = None
+    ) -> plt.Axes:
+        """
+        Calculate clusters for the residue specified by `aa_id`,
+        then plot the two first angles in `self.angleDict` over all conformers,
+        colour-coded by cluster assignment.
+        """
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, squeeze=True)
+        clusters = self._clust_aa(aa_id)
+        angles = self._single_residue_angles(aa_id)
+        ax.scatter(
+            x=angles[:, 0],
+            y=angles[:, 1],
+            c=clusters,
+            marker=".",
+        )
+        ax.set_xlim(-180, 180)
+        ax.set_ylim(-180, 180)
+        ax.set_xlabel(f"${self._angle_to_tex(self.angleDict[0])}$")
+        ax.set_ylabel(f"${self._angle_to_tex(self.angleDict[1])}$")
+        return ax
+
+    def draw_clusters(
+        self,
+        chain_id: Optional[str] = None,
+        angles: Optional[Tuple[str, str]] = None,
+        aa_ids: Optional[List[int]] = None,
+        combine: Optional[int] = None,
+        output_dir: Optional[str | os.PathLike] = None,
+    ) -> List[plt.Figure]:
+        """
+        Draw clusters of angles for each residue using `_draw_clusters_single_aa()`,
+        then combine `combine` individual plots per figure to save/return.
+
+        Each parameter's default behaviour can be obtained by setting it to `None`.
+
+        :param chain_id: Which chain to draw angles from (*default:* first in protein)
+        :param angles: Which two angles to use (*default:* first two in `self.angleDict`)
+        :param aa_ids: Which residues to use (*default:* all allowed)
+        :param combine: How many residues to combine as subplots per figure (*default:* `min(9, len(aa_ids))`)
+        :param output_dir: Where to save resulting figures to (*default:* do not save)
+        """
+        # Set default values
+        if chain_id is None:
+            chain_id = next(self.structure.get_chains()).id
+        if angles is None:
+            angles = tuple(self.angleDict[:2])
+        if aa_ids is None:
+            aa_ids = sorted(
+                {
+                    res.id[1]
+                    for model in self.structure.get_models()
+                    for res in model[chain_id].get_residues()
+                    if is_aa(res, standard=True)
+                    and res.internal_coord
+                    and res.get_resname() not in self.bannedRes
+                }
+            )
+        if combine is None:
+            combine = min(9, len(aa_ids))
+
+        # Temporarily restrict `self.angle_data` to the angle types set in `angles`
+        self.angleDict = [angles[0], angles[1]]
+        old_angle_data = self.angle_data
+        self.angle_data = self._all_residues_angles(chain_id)
+
+        # Set up figures & axes
+        figs = []
+        axs = []
+        nrows = int(np.sqrt(combine))
+        ncols = combine // nrows
+        for i in range(len(aa_ids)):
+            idx = i % combine
+            if idx == 0:
+                figs.append(
+                    plt.figure(
+                        layout="compressed",
+                        figsize=(4.8 * ncols, 3.6 * nrows),
+                    )
+                )
+            axs.append(figs[-1].add_subplot(nrows, ncols, idx + 1))
+
+        # Draw clusters on each figure
+        axs = (ax for fig in figs for ax in fig.axes)
+        fig_aa_ids = {fig: [] for fig in figs}
+        for aa_id, ax in console.tqdm(zip(aa_ids, axs), desc="Drawing clusters"):
+            fig_aa_ids[ax.figure].append(aa_id)
+            self._draw_clusters_single_aa(aa_id=aa_id, ax=ax)
+            ax.set_title(f"Residue {aa_id}")
+
+        # Save figures
+        if output_dir is not None:
+            os.makedirs(output_dir, exist_ok=True)
+            for fig in figs:
+                aa_ids = fig_aa_ids[fig]
+                if len(aa_ids) > 1:
+                    filename = f"angles_{angles[0]}-{angles[1]}_resid_{aa_ids[0]}-{aa_ids[-1]}.svg"
+                else:
+                    filename = f"angles_{angles[0]}-{angles[1]}_resid_{aa_ids[0]}.svg"
+                fig.savefig(os.path.join(output_dir, filename))
+
+        # Reset `self.angle_data` to previous value
+        self.angle_data = old_angle_data
+        self.angle_data = self._all_residues_angles(chain_id)
+
+        return figs
