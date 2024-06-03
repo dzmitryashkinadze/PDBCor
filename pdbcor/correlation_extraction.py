@@ -41,21 +41,24 @@ class CorrelationExtraction:
         console.h1("PDBCor")
 
         # HYPERVARIABLES
-        self.mode = mode
-        self.PDBfilename = os.path.basename(path)
+        self.mode: str = mode
+        self.PDBfilename: str | os.PathLike = os.path.basename(path)
         if output_directory is None or output_directory == "":
             output_directory = f"correlations_{os.path.splitext(self.PDBfilename)[0]}"
-        self.savePath = os.path.join(os.path.dirname(path), output_directory)
+        self.savePath: str | os.PathLike = os.path.join(
+            os.path.dirname(path), output_directory
+        )
         os.makedirs(self.savePath, exist_ok=True)
-        self.therm_iter = therm_iter
-        self.resid = []
-        self.aaS = 0
-        self.aaF = 0
-        self.nstates = nstates  # number of states
+        self.therm_iter: int = therm_iter
+        self.resid: list[int] = []
+        self.aaS: int = 0
+        self.aaF: int = 0
+        self.nstates: int = nstates  # number of states
 
         # CREATE CORRELATION ESTIMATORS WITH STRUCTURE ANG CLUSTERING MODEL
         console.h2("Setup")
         console.h3("Structure file import")
+        structure_parser: MMCIFParser | PDBParser  # for mypy
         if input_file_format is None:
             if os.path.splitext(self.PDBfilename)[1] == ".pdb":
                 console.print("PDB format identified.")
@@ -209,7 +212,7 @@ class CorrelationExtraction:
             )
 
     def _calc_cor_chain(
-        self, chain: str, chainPath: str | os.PathLike, resid: List[int], graphics: bool
+        self, chain: str, chainPath: str, resid: List[int], graphics: bool
     ) -> None:
         """
         Execute correlation extraction for a single chain.
@@ -228,9 +231,9 @@ class CorrelationExtraction:
         ang_ami = self._calc_ami(ang_clusters, resid)
         ang_hm = self._ami_list_to_matrix(ang_ami, ang_banres)
         # Run a series of thermally corrected distance correlation extractions
-        dist_ami = None
-        dist_hm = None
-        dist_clusters = None
+        dist_ami = np.empty((0, 0))
+        dist_hm = np.empty((0, 0))
+        dist_clusters = np.empty(0)
         for i in range(self.therm_iter):
             console.h3(f"Distance clustering (run {i+1} of {self.therm_iter})")
             dist_clusters, dist_banres = self.dist_clust_calc.cluster(chain, resid)
@@ -242,7 +245,7 @@ class CorrelationExtraction:
             else:
                 dist_ami = np.dstack((dist_ami, dist_ami_loc))
                 dist_hm = np.dstack((dist_hm, dist_hm_loc))
-        if dist_ami is None or dist_hm is None or dist_clusters is None:
+        if dist_ami.size == 0 or dist_hm.size == 0 or dist_clusters.size == 0:
             raise ValueError("Calculation not completed correctly.")
         # Average them
         if self.therm_iter > 1:
@@ -253,8 +256,7 @@ class CorrelationExtraction:
         ang_ami[:, 2] = np.around(ang_ami[:, 2], 4)
         # Calculate best coloring vector
         ami_sum = np.nansum(dist_hm, axis=1)
-        best_res = [i for i in range(len(ami_sum)) if ami_sum[i] == np.nanmax(ami_sum)]
-        best_res = best_res[0]
+        best_res = np.argmax(ami_sum)
         best_clust = dist_clusters[best_res, :]
         console.h3("Finalizing")
         console.print("Processing correlation matrices...")
@@ -292,7 +294,7 @@ class CorrelationExtraction:
             self._corr_per_resid_bar_plot(
                 ang_hm, os.path.join(chainPath, "seq_ang_" + self.mode + ".png")
             )
-            shutil.make_archive(self.savePath, "zip", self.savePath + "/")
+            shutil.make_archive(str(self.savePath), "zip", str(self.savePath) + "/")
         console.print("Done!", style="green")
 
     def write_correlations(
@@ -459,7 +461,7 @@ class CorrelationExtraction:
         else:
             ax.set_xlim(self.aaS + 50 * ind - 1, self.aaS + 50 * (ind + 1))
         ax.set_xticks(range_loc)
-        ax.set_xticklabels([i for i in range_loc], fontsize=10, rotation=90)
+        ax.set_xticklabels([f"{i}" for i in range_loc], fontsize=10, rotation=90)
         ax.yaxis.set_major_formatter(FormatStrFormatter("%.3f"))
         ax.yaxis.set_minor_locator(AutoMinorLocator())
         ax.set_ylabel("Correlation")
