@@ -209,6 +209,7 @@ class AngleClusterCalculator(ClusterCalculator):
         mode: str,
         nstates: int,
         clust_model: GaussianMixture,
+        featurize: bool = True,
     ):
         """
         Set hypervariables and import structure.
@@ -220,6 +221,8 @@ class AngleClusterCalculator(ClusterCalculator):
         :param mode: Correlation mode (can be `"backbone"`, `"sidechain"` or `"combined"`)
         :param nstates: Number of states to use for clustering
         :param clust_model: `GaussianMixture` model to use for clustering
+        :param featurize: "Featurize" angles by transforming into sin/cos instead of using directly for clustering
+            (default: `True`)
         """
         # HYPERVARIABLES
         self.nstates = nstates  # number of states
@@ -238,6 +241,7 @@ class AngleClusterCalculator(ClusterCalculator):
         self.banres = []
         self.resid = []
         self.angle_data = np.empty((0, 0))
+        self.featurize = featurize
 
     @staticmethod
     def _angle_to_tex(angle):
@@ -276,7 +280,14 @@ class AngleClusterCalculator(ClusterCalculator):
         Angle values are extracted from `self.angle_data`
         (requires this field to have been filled by `self._all_residues_angles()`).
         """
-        return self.angle_data[self.angle_data[:, 1] == aa_id, 2:]
+        angles = self.angle_data[self.angle_data[:, 1] == aa_id, 2:]
+        return angles
+
+    @staticmethod
+    def featurize_angles(angles_deg: np.ndarray) -> np.ndarray:
+        """ "Featurize" angles (given in degrees) by transforming into sin/cos."""
+        angles_rad = angles_deg * np.pi / 180
+        return np.hstack([np.sin(angles_rad), np.cos(angles_rad)])
 
     @staticmethod
     def correct_cyclic_angle(ang: np.ndarray) -> np.ndarray:
@@ -312,12 +323,15 @@ class AngleClusterCalculator(ClusterCalculator):
         Amino acids containing no angle data are added to `self.banres` and a zero array is returned.
         """
         features = self._single_residue_angles(aa_id)
-        if features.shape == (0, 5):
+        if features.shape[0] == 0:
             self.banres.append(aa_id)
             return np.zeros(self.nConf)
-        # correct the cyclic angle coordinates
-        for i in range(len(self.angleDict)):
-            features[:, i] = self.correct_cyclic_angle(features[:, i])
+        # Featurize angles or correct the cyclic angle coordinates
+        if self.featurize:
+            features = self.featurize_angles(features)
+        else:
+            for i in range(len(self.angleDict)):
+                features[:, i] = self.correct_cyclic_angle(features[:, i])
         # CLUSTERING
         if prob:
             self.clust_model.fit(features)
