@@ -438,7 +438,7 @@ class AngleClusterCalculator(ClusterCalculator):
         # Draw clusters on each figure
         axs = (ax for fig in figs for ax in fig.axes)
         fig_aa_ids = {fig: [] for fig in figs}
-        for aa_id, ax in console.tqdm(zip(aa_ids, axs), desc="Drawing clusters"):
+        for aa_id, ax in zip(console.tqdm(aa_ids, desc="Drawing clusters"), axs):
             fig_aa_ids[ax.figure].append(aa_id)
             self._draw_clusters_single_aa(aa_id=aa_id, ax=ax)
             ax.set_title(f"Residue {aa_id}")
