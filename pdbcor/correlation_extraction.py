@@ -182,6 +182,8 @@ class CorrelationExtraction:
 
         Uses `self.aaS`/`self.aaF` (set by `self.calculate_correlation()`)
         to specify the shape of the correlation matrix.
+        Index 0 corresponds to `aaS` and the final row/column to `aaF`,
+        with skipped residue numbers within this range being represented by `np.nan`.
 
         :param ami_list: `ndarray` containing AMI values in pairwise list form with rows `[ resi_i, resi_j, ami_i_j ]`
         :param banres: list of excluded residues (set to `NaN`)
@@ -258,9 +260,7 @@ class CorrelationExtraction:
 
         if self.uses_angles:
             ang_ami, ang_clusters, ang_hm = self._calc_cor_chain_ang(chain, resid)
-            best_ang_clusters = CorrelationExtraction.best_clusters(
-                ang_hm, ang_clusters
-            )
+            best_ang_clusters = self.best_clusters(ang_hm, ang_clusters)
             output_handler.generate_single_feature_output(
                 corr_list=ang_ami,
                 clusters=ang_clusters,
@@ -281,7 +281,6 @@ class CorrelationExtraction:
                 best_clust=best_dist_clusters,
                 feature_name=("dist", "distance"),
             )
-            best_dist_clusters = self.best_clusters(dist_hm, dist_clusters)
         else:
             dist_ami, dist_clusters, dist_hm = None, None, None
             best_dist_clusters = None
@@ -337,9 +336,18 @@ class CorrelationExtraction:
 
         return ang_ami, ang_clusters, ang_hm
 
-    @staticmethod
-    def best_clusters(corr_matrix, clusters):
-        """Calculate the best clusters, i.e. those belonging to the residue with the highest total correlation."""
+    def best_clusters(self, corr_matrix, clusters):
+        """
+        Calculate the best clusters, i.e. those belonging to the residue with the highest total correlation.
+
+        Requires "conversion" of index from the correlation matrix to the cluster assignment list:
+        The matrix contains `(self.aaF - self.aaS + 1)` rows/columns, with "skipped" residues represented as `np.nan`,
+        whereas there are only `len(self.resid)` defined cluster assignments.
+        Therefore, `(<matrix_row_id> + self.aaS)` gives any row's actual residue number,
+        and the index of this value in `self.resid` is the same index
+        that should be used to retrieve that residue's cluster assignments.
+        """
         corr_sum = np.nansum(corr_matrix, axis=1)
-        best_res = np.argmax(corr_sum)
-        return clusters[best_res, :]
+        best_row_id = np.argmax(corr_sum)
+        best_cluster_idx = self.resid.index(best_row_id + self.aaS)  # index conversion
+        return clusters[best_cluster_idx, :]

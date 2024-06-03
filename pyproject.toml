@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "PDBCor"
-version = "1.6.2"
+version = "1.6.3"
 description = "Extraction of correlated motion from multi-state PDB protein coordinates"
 authors = [
     "Dzmitry Ashkinadze",
