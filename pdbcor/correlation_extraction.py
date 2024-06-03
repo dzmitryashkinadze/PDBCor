@@ -1,21 +1,15 @@
-import json
 import os
-import shutil
-from copy import copy
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import matplotlib
 import numpy as np
-import pandas as pd
 from Bio.PDB import MMCIFParser
 from Bio.PDB.PDBParser import PDBParser
 from Bio.PDB.Polypeptide import is_aa
-from matplotlib import pyplot as plt
-from matplotlib.cm import get_cmap
-from matplotlib.ticker import FormatStrFormatter, MultipleLocator, AutoMinorLocator
-from sklearn.metrics import adjusted_mutual_info_score  # type: ignore
+from sklearn.metrics import adjusted_mutual_info_score, adjusted_rand_score  # type: ignore
 from sklearn.mixture import GaussianMixture  # type: ignore
 
+from .io import CorrelationExtractionIOParams, CorrelationExtractionIO
 from .clustering import DistanceClusterCalculator, AngleClusterCalculator
 from .console import console
 
@@ -27,40 +21,60 @@ class CorrelationExtraction:
 
     def __init__(
         self,
-        path: str | os.PathLike,
+        pdb_file_path: Union[str, os.PathLike],
         input_file_format: Optional[str] = None,
-        output_directory: Optional[str | os.PathLike] = None,
-        mode: str = "backbone",
+        output_directory: Optional[Union[str, os.PathLike]] = None,
+        io_params: Optional[CorrelationExtractionIOParams] = None,
+        residue_subset: str = "backbone",
+        features: str = "both",
         nstates: int = 2,
         therm_fluct: float = 0.5,
         therm_iter: int = 5,
         loop_start: int = -1,
         loop_end: int = -1,
+        fast: bool = False,
     ):
-        """Initialize the `CorrelationExtraction` object and clustering estimators."""
+        """
+        Initialize the `CorrelationExtraction` object and clustering estimators.
+
+        Fast mode
+        ---------
+
+        If `fast` is `True`, "fast mode" will be activated for correlation calculation.
+
+        This changes the following:
+
+        * Adjusted Rand score used for calculating correlation instead of adjusted mutual information
+        * GMM initialized using k-means++ instead of full k-means
+        * GMM fitting replicated 10x instead of 25x per clustering
+        """
         console.h1("PDBCor")
 
         # HYPERVARIABLES
-        self.mode: str = mode
-        self.PDBfilename: str | os.PathLike = os.path.basename(path)
-        if output_directory is None or output_directory == "":
-            output_directory = f"correlations_{os.path.splitext(self.PDBfilename)[0]}"
-        self.savePath: str | os.PathLike = os.path.join(
-            os.path.dirname(path), output_directory
+        self.residue_subset: str = residue_subset
+        self.features: str = features
+        self.pdb_file_path: Union[str, os.PathLike] = pdb_file_path
+        self.pdb_file_name: Union[str, os.PathLike] = os.path.basename(
+            self.pdb_file_path
         )
-        os.makedirs(self.savePath, exist_ok=True)
+        self.io = CorrelationExtractionIO(
+            correlation_extraction=self,
+            output_directory=output_directory,
+            params=io_params,
+        )
         self.therm_iter: int = therm_iter
         self.resid: list[int] = []
         self.aaS: int = 0
         self.aaF: int = 0
         self.nstates: int = nstates  # number of states
+        self.fast = fast
 
         # CREATE CORRELATION ESTIMATORS WITH STRUCTURE ANG CLUSTERING MODEL
         console.h2("Setup")
         console.h3("Structure file import")
-        structure_parser: MMCIFParser | PDBParser  # for mypy
+        structure_parser: Union[MMCIFParser, PDBParser]  # for mypy
         if input_file_format is None:
-            if os.path.splitext(self.PDBfilename)[1] == ".pdb":
+            if os.path.splitext(self.pdb_file_name)[1] == ".pdb":
                 console.print("PDB format identified.")
                 structure_parser = PDBParser()
             else:
@@ -75,7 +89,7 @@ class CorrelationExtraction:
         else:
             raise ValueError(f"Invalid structure file format: {input_file_format}")
         console.print("Parsing structure file...")
-        self.structure = structure_parser.get_structure("test", path)
+        self.structure = structure_parser.get_structure("test", pdb_file_path)
         self.chain_ids = [chain.id for chain in self.structure[0].get_chains()]
         console.print(
             "Structure parsed successfully "
@@ -85,22 +99,55 @@ class CorrelationExtraction:
         console.h3("Clustering model initialization")
         console.print("Initializing GMM...")
         clust_model = GaussianMixture(
-            n_components=self.nstates, n_init=25, covariance_type="diag"
+            n_components=self.nstates,
+            n_init=10 if self.fast else 25,
+            covariance_type="diag",
+            init_params="k-means++" if self.fast else "kmeans",
         )
-        console.print("Initializing cluster calculators...")
-        self.dist_clust_calc = DistanceClusterCalculator(
-            self.structure,
-            mode,
-            nstates,
-            clust_model,
-            therm_fluct,
-            loop_start,
-            loop_end,
+
+        console.print(f"Initializing {self.features} cluster calculators...")
+        self.dist_clust_calc = (
+            DistanceClusterCalculator(
+                self.structure,
+                residue_subset,
+                nstates,
+                clust_model,
+                therm_fluct,
+                loop_start,
+                loop_end,
+                output_parent_path=self.io.output_parent_path,
+                io_params=io_params,
+            )
+            if self.uses_distances
+            else None
         )
-        self.ang_clust_calc = AngleClusterCalculator(
-            self.structure, mode, nstates, clust_model
+        self.ang_clust_calc = (
+            AngleClusterCalculator(
+                self.structure,
+                residue_subset,
+                nstates,
+                clust_model,
+                output_parent_path=self.io.output_parent_path,
+                io_params=io_params,
+            )
+            if self.uses_angles
+            else None
         )
+
         console.print("Setup complete.", style="green")
+
+        self.correlation_metric = (
+            adjusted_rand_score if self.fast else adjusted_mutual_info_score
+        )
+        console.print(f"Fast mode {'enabled' if self.fast else 'disabled'}.")
+
+    @property
+    def uses_angles(self) -> bool:
+        return self.features in {"both", "angle"}
+
+    @property
+    def uses_distances(self) -> bool:
+        return self.features in {"both", "distance"}
 
     def _calc_ami(self, clusters: np.ndarray, resid: List[int]) -> np.ndarray:
         """
@@ -116,7 +163,7 @@ class CorrelationExtraction:
                 [
                     resid[i],  # residue ID i
                     resid[j],  # residue ID j
-                    adjusted_mutual_info_score(
+                    self.correlation_metric(
                         clusters[i, :], clusters[j, :]
                     ),  # correlation
                 ]
@@ -163,7 +210,7 @@ class CorrelationExtraction:
 
         return ami_matrix
 
-    def calculate_correlation(self, graphics: bool = True) -> None:
+    def calculate_correlation(self) -> None:
         """
         Main function for calculating correlation.
 
@@ -173,14 +220,7 @@ class CorrelationExtraction:
 
         Also calculates minimum/maximum residue nr. and saves to `self.aaS`/`self.aaF`
         """
-        # write readme file
-        shutil.copyfile(
-            os.path.join(os.path.dirname(os.path.realpath(__file__)), "README.txt"),
-            os.path.join(self.savePath, "README.txt"),
-        )
         for chain in self.chain_ids:
-            chain_path = os.path.join(self.savePath, "chain" + chain)
-            os.makedirs(chain_path, exist_ok=True)
             self.resid = []
             for res in self.structure[0][chain].get_residues():
                 if is_aa(res, standard=True):
@@ -188,32 +228,13 @@ class CorrelationExtraction:
             self.aaS = min(self.resid)
             self.aaF = max(self.resid)
             console.h2(f"Chain {chain}")
-            self._calc_cor_chain(chain, chain_path, self.resid, graphics)
+            self._calc_cor_chain(chain, self.resid)
 
-    def draw_angle_clusters(self):
-        """
-        Cluster each residue using data for two angles,
-        then plot the angles over all conformers,
-        colour-coded by cluster assignment.
+        console.h3("Final processing")
+        self.io.finalize_analysis()
+        console.print("PDBCor complete!", style="green")
 
-        Serves as a wrapper around `clustering.AngleClusterCalculator.draw_clusters()`
-        to iterate over all chains and provide a sensible output directory.
-
-        Angles clustered/plotted by default:
-
-        - `mode == "backbone"` or `mode == "combined"`: phi, psi
-        - `mode == "sidechain"`: chi1, chi2
-        """
-        for chain in self.chain_ids:
-            chain_path = os.path.join(self.savePath, "chain" + chain)
-            os.makedirs(chain_path, exist_ok=True)
-            self.ang_clust_calc.draw_clusters(
-                chain_id=chain, output_dir=os.path.join(chain_path, "angle_clusters")
-            )
-
-    def _calc_cor_chain(
-        self, chain: str, chainPath: str, resid: List[int], graphics: bool
-    ) -> None:
+    def _calc_cor_chain(self, chain: str, resid: List[int]) -> None:
         """
         Execute correlation extraction for a single chain.
 
@@ -225,17 +246,55 @@ class CorrelationExtraction:
         #. Clean up data etc.
         #. Output data & generate figures.
         """
-        # extract angle correlation matrices
-        console.h3("Angle clustering")
-        ang_clusters, ang_banres = self.ang_clust_calc.cluster(chain, resid)
-        ang_ami = self._calc_ami(ang_clusters, resid)
-        ang_hm = self._ami_list_to_matrix(ang_ami, ang_banres)
-        # Run a series of thermally corrected distance correlation extractions
+        output_handler = self.io.chain_io(
+            chain_id=chain,
+        )
+
+        if self.uses_angles:
+            ang_ami, ang_clusters, ang_hm = self._calc_cor_chain_ang(chain, resid)
+            best_ang_clusters = CorrelationExtraction.best_clusters(
+                ang_hm, ang_clusters
+            )
+            output_handler.generate_single_feature_output(
+                corr_list=ang_ami,
+                clusters=ang_clusters,
+                corr_matrix=ang_hm,
+                best_clust=best_ang_clusters,
+                feature_name=("ang", "angle"),
+            )
+        else:
+            ang_ami, ang_clusters, ang_hm = None, None, None
+
+        if self.uses_distances:
+            dist_ami, dist_clusters, dist_hm = self._calc_cor_chain_dist(chain, resid)
+            best_dist_clusters = self.best_clusters(dist_hm, dist_clusters)
+            output_handler.generate_single_feature_output(
+                corr_list=dist_ami,
+                clusters=dist_clusters,
+                corr_matrix=dist_hm,
+                best_clust=best_dist_clusters,
+                feature_name=("dist", "distance"),
+            )
+            best_dist_clusters = self.best_clusters(dist_hm, dist_clusters)
+        else:
+            dist_ami, dist_clusters, dist_hm = None, None, None
+            best_dist_clusters = None
+
+        output_handler.generate_combined_output(dist_ami, ang_ami, best_dist_clusters)
+        console.print(f"Chain {chain} complete!", style="green")
+
+    def _calc_cor_chain_dist(self, chain, resid):
+        assert isinstance(self.dist_clust_calc, DistanceClusterCalculator)
+        assert self.therm_iter > 0
+
+        # Initialize arrays as empty to ensure they exist
         dist_ami = np.empty((0, 0))
         dist_hm = np.empty((0, 0))
         dist_clusters = np.empty(0)
+
+        # Run a series of thermally corrected distance correlation extractions
         for i in range(self.therm_iter):
-            console.h3(f"Distance clustering (run {i+1} of {self.therm_iter})")
+            console.h3(f"Distance clustering (run {i + 1} of {self.therm_iter})")
             dist_clusters, dist_banres = self.dist_clust_calc.cluster(chain, resid)
             dist_ami_loc = self._calc_ami(dist_clusters, resid)
             dist_hm_loc = self._ami_list_to_matrix(dist_ami_loc, dist_banres)
@@ -247,242 +306,34 @@ class CorrelationExtraction:
                 dist_hm = np.dstack((dist_hm, dist_hm_loc))
         if dist_ami.size == 0 or dist_hm.size == 0 or dist_clusters.size == 0:
             raise ValueError("Calculation not completed correctly.")
-        # Average them
+
+        # Average over iterations
         if self.therm_iter > 1:
             dist_ami = np.mean(dist_ami, axis=2)
             dist_hm = np.mean(dist_hm, axis=2)
-        # round correlations down to 3 significant numbers
+
+        # Round to 3 sign. digits
         dist_ami[:, 2] = np.around(dist_ami[:, 2], 4)
+
+        return dist_ami, dist_clusters, dist_hm
+
+    def _calc_cor_chain_ang(self, chain, resid):
+        assert isinstance(self.ang_clust_calc, AngleClusterCalculator)
+
+        # extract angle correlation matrices
+        console.h3("Angle clustering")
+        ang_clusters, ang_banres = self.ang_clust_calc.cluster(chain, resid)
+        ang_ami = self._calc_ami(ang_clusters, resid)
+        ang_hm = self._ami_list_to_matrix(ang_ami, ang_banres)
+
+        # Round to 3 sign. digits
         ang_ami[:, 2] = np.around(ang_ami[:, 2], 4)
-        # Calculate best coloring vector
-        ami_sum = np.nansum(dist_hm, axis=1)
-        best_res = np.argmax(ami_sum)
-        best_clust = dist_clusters[best_res, :]
-        console.h3("Finalizing")
-        console.print("Processing correlation matrices...")
-        df = pd.DataFrame(ang_ami, columns=["ID1", "ID2", "Correlation"])
-        df["ID1"] = df["ID1"].astype("int")
-        df["ID2"] = df["ID2"].astype("int")
-        df.to_csv(chainPath + "/ang_ami_" + self.mode + ".csv", index=False)
-        df = pd.DataFrame(dist_ami, columns=["ID1", "ID2", "Correlation"])
-        df["ID1"] = df["ID1"].astype("int")
-        df["ID2"] = df["ID2"].astype("int")
-        df.to_csv(chainPath + "/dist_ami_" + self.mode + ".csv", index=False)
-        # write correlation parameters
-        self.write_correlations(dist_ami, ang_ami, best_clust, chainPath)
-        # create visualisation scripts
-        self.write_chimera_script(best_clust, chainPath)
-        self.write_pymol_script(best_clust, chainPath)
-        # plot everything
-        if graphics:
-            console.print("Plotting...")
-            self.plot_heatmaps(
-                dist_hm, os.path.join(chainPath, "heatmap_dist_" + self.mode + ".png")
-            )
-            self.plot_heatmaps(
-                ang_hm, os.path.join(chainPath, "heatmap_ang_" + self.mode + ".png")
-            )
-            self.plot_hist(
-                dist_ami, os.path.join(chainPath, "hist_dist_" + self.mode + ".png")
-            )
-            self.plot_hist(
-                ang_ami, os.path.join(chainPath, "hist_ang_" + self.mode + ".png")
-            )
-            self._corr_per_resid_bar_plot(
-                dist_hm, os.path.join(chainPath, "seq_dist_" + self.mode + ".png")
-            )
-            self._corr_per_resid_bar_plot(
-                ang_hm, os.path.join(chainPath, "seq_ang_" + self.mode + ".png")
-            )
-            shutil.make_archive(str(self.savePath), "zip", str(self.savePath) + "/")
-        console.print("Done!", style="green")
 
-    def write_correlations(
-        self,
-        dist_ami: np.ndarray,
-        ang_ami: np.ndarray,
-        best_clust: np.ndarray,
-        path: str | os.PathLike,
-    ) -> None:
-        """
-        Write files with correlation results.
-
-        * `correlations_{self.mode}.txt`:
-            * Mean AMI values over all pairs of residues
-            * Populations of each state
-        * `results.json`:
-            * Mean AMI values over all pairs of residues
-        """
-
-        # correlation parameters
-        dist_cor = np.mean(dist_ami[:, 2])
-        ang_cor = np.mean(ang_ami[:, 2])
-        with open(os.path.join(path, "correlations_" + self.mode + ".txt"), "w") as f:
-            f.write(
-                "Distance correlations: {}\nAngle correlations: {} \n".format(
-                    dist_cor, ang_cor
-                )
-            )
-            for i in range(self.nstates):
-                pop = len([j for j in best_clust if j == i]) / len(best_clust)
-                f.write("State {} population: {} \n".format(i + 1, pop))
-        result_dist = {
-            "dist_cor": np.around(dist_cor, 4),
-            "ang_cor": np.around(ang_cor, 4),
-        }
-        with open(os.path.join(path, f"results_{self.mode}.json"), "w") as outfile:
-            json.dump(
-                {
-                    "distribution": result_dist,
-                    "cluster_assignment": {
-                        i + 1: int(best_clust[i]) for i in range(len(self.structure))
-                    },
-                },
-                outfile,
-            )
-
-    def write_chimera_script(
-        self, best_clust: np.ndarray, path: str | os.PathLike
-    ) -> None:
-        """Construct a Chimera script to view the calculated states in color."""
-        state_color = ["#00FFFF", "#00008b", "#FF00FF", "#FFFF00", "#000000"]
-        chimera_path = os.path.join(path, "bundle_vis_chimera_" + self.mode + ".py")
-        with open(chimera_path, "w") as f:
-            f.write("from chimera import runCommand as rc\n")
-            f.write('rc("open ../../{}")\n'.format(self.PDBfilename))
-            f.write('rc("background solid white")\n')
-            f.write('rc("~ribbon")\n')
-            f.write('rc("show :.a@ca")\n')
-            # bundle coloring
-            for i in range(len(self.structure)):
-                f.write(
-                    'rc("color {} #0.{}")\n'.format(
-                        state_color[int(best_clust[i])], int(i + 1)
-                    )
-                )
-
-    def write_pymol_script(
-        self, best_clust: np.ndarray, path: str | os.PathLike
-    ) -> None:
-        """Construct a PyMOL script to view the calculated clusters in separate colours"""
-        state_color = ["0x00FFFF", "0x00008b", "0xFF00FF", "0xFFFF00", "0x000000"]
-        pymol_path = os.path.join(path, "bundle_vis_pymol_" + self.mode + ".pml")
-        with open(pymol_path, "w") as f:
-            f.write(f"load ../../{self.PDBfilename}\n")
-            f.write("bg_color white\n")
-            f.write("hide\n")
-            f.write("show ribbon\n")
-            f.write("set all_states, true\n")
-            f.writelines(
-                [
-                    f"set ribbon_color, {state_color[int(best_clust[i])]}, all, {i+1}\n"
-                    for i in range(len(self.structure))
-                ]
-            )
-
-    def plot_heatmaps(self, hm: np.ndarray, path: str | os.PathLike) -> None:
-        """Plot the correlation matrix as a heatmap."""
-        # change color map to display nans as gray
-        cmap = copy(get_cmap("viridis"))
-        cmap.set_bad("gray")
-        # plot distance heatmap
-        fig, ax = plt.subplots()
-        pos = ax.imshow(
-            hm,
-            origin="lower",
-            extent=[self.aaS, self.aaF, self.aaS, self.aaF],
-            cmap=cmap,
-            vmin=0,
-            vmax=1,
-        )
-        fig.colorbar(pos, ax=ax)
-        ax.xaxis.set_minor_locator(MultipleLocator(1))
-        ax.yaxis.set_minor_locator(MultipleLocator(1))
-        plt.xlabel("Residue ID")
-        plt.ylabel("Residue ID")
-        plt.savefig(path, dpi=300, bbox_inches="tight")
-        plt.close()
+        return ang_ami, ang_clusters, ang_hm
 
     @staticmethod
-    def plot_hist(ami: np.ndarray, path: str | os.PathLike) -> None:
-        """Plot a histogram of correlation parameters (from `ndarray` of pairwise AMI values)."""
-        # plot distance correlation histogram
-        start = np.floor(min(ami[:, 2]) * 50) / 50
-        nbreaks = int((1 - start) / 0.02) + 1
-        fig, ax = plt.subplots()
-        ax.hist(ami[:, 2], bins=np.linspace(start, 1, nbreaks), density=True)
-        ax.xaxis.set_minor_locator(MultipleLocator(0.02))
-        ax.xaxis.set_major_locator(MultipleLocator(0.1))
-        ax.yaxis.set_minor_locator(AutoMinorLocator())
-        ax.set_xlabel("Correlation")
-        ax.set_ylabel("Density")
-        plt.savefig(path, dpi=300, bbox_inches="tight")
-        plt.close()
-
-    def _corr_per_resid_bar_subplot(
-        self, cor_seq: np.ndarray, ax: plt.Axes, ind: int
-    ) -> None:
-        """
-        Create a barplot of average correlation parameters per residue,
-        to be used as a single row in `self._corr_per_resid_bar_plot()`.
-        """
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        range_loc = range(
-            self.aaS + 50 * ind, min(self.aaF + 1, self.aaS + 50 * (ind + 1))
-        )
-        cor_seq_loc = cor_seq[(50 * ind) : min(len(cor_seq), 50 * (ind + 1))]
-        if min(cor_seq) < 0:
-            cor_range = max(cor_seq) - min(cor_seq)
-            ax.set_ylim(min(cor_seq) - cor_range / 8, max(cor_seq) + cor_range / 8)
-        else:
-            ax.set_ylim(0, max(cor_seq))
-            cor_range = max(cor_seq)
-        ax.bar(range_loc, cor_seq_loc, width=0.8)
-        for ind2, cor in enumerate(cor_seq_loc):
-            if cor >= 0:
-                ax.text(
-                    range_loc[ind2] - 0.25,
-                    cor + cor_range / 50,
-                    "{:.3f}".format(cor),
-                    fontsize=10,
-                    rotation=90,
-                )
-            else:
-                ax.text(
-                    range_loc[ind2] - 0.25,
-                    cor - cor_range / 11,
-                    "{:.3f}".format(cor),
-                    fontsize=10,
-                    rotation=90,
-                )
-        if len(cor_seq) < 50:
-            ax.set_xlim(self.aaS + 50 * ind - 1, self.aaF + 1)
-        else:
-            ax.set_xlim(self.aaS + 50 * ind - 1, self.aaS + 50 * (ind + 1))
-        ax.set_xticks(range_loc)
-        ax.set_xticklabels([f"{i}" for i in range_loc], fontsize=10, rotation=90)
-        ax.yaxis.set_major_formatter(FormatStrFormatter("%.3f"))
-        ax.yaxis.set_minor_locator(AutoMinorLocator())
-        ax.set_ylabel("Correlation")
-        if ind == np.ceil(len(cor_seq) / 50) - 1:
-            ax.set_xlabel("Residue ID")
-
-    def _corr_per_resid_bar_plot(self, hm: np.ndarray, path: str | os.PathLike) -> None:
-        """Save a bar plot of the average correlation parameter for each residue."""
-        cor_seq = np.mean(np.nan_to_num(hm), axis=0)
-        fig, axs = plt.subplots(
-            nrows=int(np.ceil(len(cor_seq) / 50)),
-            ncols=1,
-            figsize=(16, 4 * int(np.ceil(len(cor_seq) / 50))),
-        )
-        if len(cor_seq) < 50:
-            self._corr_per_resid_bar_subplot(cor_seq, axs, 0)
-        else:
-            for ind, ax in enumerate(axs):
-                self._corr_per_resid_bar_subplot(cor_seq, ax, ind)
-        plt.subplots_adjust(
-            left=0.125, bottom=-0.8, right=0.9, top=0.9, wspace=0.2, hspace=0.2
-        )
-        plt.savefig(path, dpi=300, bbox_inches="tight")
-        plt.close()
+    def best_clusters(corr_matrix, clusters):
+        """Calculate the best clusters, i.e. those belonging to the residue with the highest total correlation."""
+        corr_sum = np.nansum(corr_matrix, axis=1)
+        best_res = np.argmax(corr_sum)
+        return clusters[best_res, :]

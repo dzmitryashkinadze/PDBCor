@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "PDBCor"
-version = "1.5.2"
+version = "1.6.0"
 description = "Extraction of correlated motion from multi-state PDB protein coordinates"
 authors = [
     "Dzmitry Ashkinadze",
@@ -42,6 +42,8 @@ matplotlib = "^3.8.4"
 biopython = "^1.83"
 tqdm = "^4.66.2"
 rich = "^13.7.1"
+pyarrow = "^16.0.0"
+pydantic = "^2.7.1"
 
 [tool.poetry.group.dev.dependencies]
 mypy = "^1.9.0"

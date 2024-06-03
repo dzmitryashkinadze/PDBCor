@@ -2,5 +2,6 @@
 <project version="4">
   <component name="MypyConfigService">
     <option name="customMypyPath" value="$mypyExecDir$/mypy" />
+    <option name="mypyArguments" value="--exclude 'correlations_*/'" />
   </component>
 </project>

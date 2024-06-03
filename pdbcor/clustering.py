@@ -1,15 +1,14 @@
 import os
-import re
 from abc import ABC, abstractmethod
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Union, Optional
 
-import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.mixture import GaussianMixture  # type: ignore
 from Bio.PDB import is_aa
 from Bio.PDB.Structure import Structure
 from Bio.PDB.Residue import Residue
 
+from .io import DistanceClusterIO, AngleClusterIO, CorrelationExtractionIOParams
 from .console import console
 
 
@@ -47,18 +46,20 @@ class DistanceClusterCalculator(ClusterCalculator):
     def __init__(
         self,
         structure: Structure,
-        mode: str,
+        residue_subset: str,
         nstates: int,
         clust_model: GaussianMixture,
         therm_fluct: float,
         loop_start: int,
         loop_end: int,
+        output_parent_path: Optional[Union[str, os.PathLike]] = None,
+        io_params: Optional[CorrelationExtractionIOParams] = None,
     ):
         """
         Set hypervariables and import structure.
 
         :param structure: `Structure` object to perform clustering on
-        :param mode: Correlation mode (can be `"backbone"`, `"sidechain"` or `"combined"`)
+        :param residue_subset: Subset of residue atoms used for clustering (can be `"backbone"`, `"sidechain"` or `"combined"`)
         :param nstates: Number of states to use for clustering
         :param clust_model: `GaussianMixture` model to use for clustering
         :param therm_fluct: Parameter for amplitude of thermal noise added to residues
@@ -74,27 +75,32 @@ class DistanceClusterCalculator(ClusterCalculator):
 
         # IMPORT THE STRUCTURE
         self.structure: Structure = structure
-        self.mode: str = mode
+        self.residue_subset: str = residue_subset
         self.backboneAtoms: list[str] = ["N", "H", "CA", "HA", "HA2", "HA3", "C", "O"]
         self.banres: list[int] = []
         self.resid: list[int] = []
         self.coord_matrix: np.ndarray = np.empty((0, 0))
+        self.io: DistanceClusterIO = DistanceClusterIO(
+            calculator=self,
+            output_parent_path=output_parent_path,
+            params=io_params,
+        )
 
     def _residue_center(self, res: Residue) -> np.ndarray:
         """
         Calculate the center of mass of a given residue.
 
-        Only backbone/sidechain coordinates are used if the corresponding correlation mode is set.
+        Only backbone/sidechain coordinates are used if the corresponding subset is set.
         Thermal noise is added to the resulting coordinates as specified by `self.therm_fluct`.
         """
         coord_flat = []
         atom_number = 0
         for atom in res.get_atoms():
-            if self.mode == "backbone":
+            if self.residue_subset == "backbone":
                 if atom.id in self.backboneAtoms:
                     atom_number += 1
                     coord_flat.extend(list(atom.get_coord()))
-            elif self.mode == "sidechain":
+            elif self.residue_subset == "sidechain":
                 if atom.id not in self.backboneAtoms:
                     atom_number += 1
                     coord_flat.extend(list(atom.get_coord()))
@@ -115,9 +121,12 @@ class DistanceClusterCalculator(ClusterCalculator):
         Get coordinates of all residues in the specified chain.
 
         Residues between `self.loop_start` and `self.loop_end` are skipped,
-        as well as glycines if `self.mode == "sidechain"`.
+        as well as glycines if `self.residue_subset == "sidechain"`.
         The coordinates of these residues are set to `[0, 0, 0]`
         and they are added to `self.banres`.
+
+        The resulting `np.ndarray` has dimensions `(num_conformers, num_residues, 3)`
+        (positions for each conformer, for each residue's center, in Cartesian coordinates).
         """
         coord_list: list[list[np.ndarray]] = []
         for model in self.structure.get_models():
@@ -126,7 +135,8 @@ class DistanceClusterCalculator(ClusterCalculator):
             for res in chain.get_residues():
                 if is_aa(res, standard=True):
                     if not (
-                        self.mode == "sidechain" and res.get_resname() == "GLY"
+                        self.residue_subset == "sidechain"
+                        and res.get_resname() == "GLY"
                     ) and not (self.loop_end >= res.id[1] >= self.loop_start):
                         model_coord.append(self._residue_center(res))
                     else:
@@ -141,29 +151,7 @@ class DistanceClusterCalculator(ClusterCalculator):
 
         Euclidean distances are calculated from `self.coord_matrix`, normalized and passed to `self.clust_model`.
         """
-        features_flat = []
-        for model in range(len(self.structure)):
-            for i in range(len(self.resid)):
-                if i != ind:
-                    # calculate Euclidean distance between residue centers
-                    dist = np.sqrt(
-                        np.sum(
-                            (
-                                self.coord_matrix[model][ind]
-                                - self.coord_matrix[model][i]
-                            )
-                            ** 2
-                        )
-                    )
-
-                    # save the distance
-                    features_flat.append(dist)
-
-        # scale features down to the unit norm and rearange into the feature matrix
-        features_flat_np = np.array(features_flat)
-        features = (features_flat_np / np.linalg.norm(features_flat_np)).reshape(
-            len(self.structure), -1
-        )
+        features = self._calc_norm_dist_matrix(ind)
 
         # clustering
         if prob:
@@ -171,6 +159,28 @@ class DistanceClusterCalculator(ClusterCalculator):
             return self.clust_model.predict_proba(features)
         else:
             return self.clust_model.fit_predict(features)
+
+    def _calc_norm_dist_matrix(self, ind):
+        """
+        Calculate normalized distances between residue `ind` and all others.
+
+        Creates a `np.ndarray` of shape `(num_conformers, num_residues - 1)`.
+        """
+        features = np.linalg.norm(  # Normalize over Cartesian coordinates
+            np.delete(  # Delete zero column corresponding to residue "ind"
+                (
+                    # Take slice of self.coord_matrix belonging to residue "ind"
+                    # and transform from shape (num_conformers, 3) to shape (num_conformers, 1, 3)
+                    # to allow subtraction via broadcasting
+                    self.coord_matrix
+                    - np.expand_dims(self.coord_matrix[:, ind, :], axis=1)
+                ),
+                ind,
+                axis=1,
+            ),
+            axis=-1,
+        )
+        return features / np.linalg.norm(features)
 
     def cluster(
         self, chain: str, resid: List[int], prob=False
@@ -197,6 +207,9 @@ class DistanceClusterCalculator(ClusterCalculator):
             ],
             axis=0,
         )
+        figs = self.io.draw_clustering_results(self.coord_matrix, clusters, chain)
+        for f in figs:
+            f.close()
         return clusters, self.banres
 
 
@@ -207,10 +220,12 @@ class AngleClusterCalculator(ClusterCalculator):
     def __init__(
         self,
         structure: Structure,
-        mode: str,
+        residue_subset: str,
         nstates: int,
         clust_model: GaussianMixture,
         featurize: bool = True,
+        output_parent_path: Optional[Union[str, os.PathLike]] = None,
+        io_params: Optional[CorrelationExtractionIOParams] = None,
     ):
         """
         Set hypervariables and import structure.
@@ -219,7 +234,7 @@ class AngleClusterCalculator(ClusterCalculator):
         using `Structure.atom_to_internal_coordinates()`.
 
         :param structure: `Structure` object to perform clustering on
-        :param mode: Correlation mode (can be `"backbone"`, `"sidechain"` or `"combined"`)
+        :param residue_subset: Subset of residue atoms used for clustering (can be `"backbone"`, `"sidechain"` or `"combined"`)
         :param nstates: Number of states to use for clustering
         :param clust_model: `GaussianMixture` model to use for clustering
         :param featurize: "Featurize" angles by transforming into sin/cos instead of using directly for clustering
@@ -241,22 +256,17 @@ class AngleClusterCalculator(ClusterCalculator):
             "sidechain": ["GLY", "ALA"],
             "combined": [],
         }
-        self.bannedRes: list[str] = banned_res_dict[mode]
-        self.angleDict: list[str] = allowed_angles[mode]
+        self.bannedRes: list[str] = banned_res_dict[residue_subset]
+        self.angleDict: list[str] = allowed_angles[residue_subset]
         self.banres: list[int] = []
         self.resid: list[int] = []
         self.angle_data: np.ndarray = np.empty((0, 0))
         self.featurize: bool = featurize
-
-    @staticmethod
-    def _angle_to_tex(angle):
-        """Represent an angle name in TeX algebra notation."""
-        angle_re = r"(?P<angle_name>[a-z]+)(?P<angle_index>[0-9]+)?"
-        angle_match = re.match(angle_re, angle.lower())
-        if angle_match.group("angle_index") is None:
-            return f"\\{angle_match.group('angle_name')}"
-        else:
-            return f"\\{angle_match.group('angle_name')}_{{{angle_match.group('angle_index')}}}"
+        self.io: AngleClusterIO = AngleClusterIO(
+            calculator=self,
+            output_parent_path=output_parent_path,
+            params=io_params,
+        )
 
     def _all_residues_angles(self, chain_id: str) -> np.ndarray:
         """
@@ -327,6 +337,11 @@ class AngleClusterCalculator(ClusterCalculator):
         Angles are calculated via `self._single_residue_angles()` and normalized via `self._correct_cyclic_angle()`.
         Amino acids containing no angle data are added to `self.banres` and a zero array is returned.
         """
+        features = self._generate_aa_features(aa_id)
+        return self._calc_result(features, prob)
+
+    def _generate_aa_features(self, aa_id: int) -> np.ndarray:
+        """Generate complete array of features for residue `aa_id`"""
         features = self._single_residue_angles(aa_id)
         if features.shape[0] == 0:
             self.banres.append(aa_id)
@@ -337,7 +352,22 @@ class AngleClusterCalculator(ClusterCalculator):
         else:
             for i in range(len(self.angleDict)):
                 features[:, i] = self.correct_cyclic_angle(features[:, i])
-        # CLUSTERING
+        return features
+
+    def _generate_aa_angles(self, aa_id: int) -> np.ndarray:
+        """
+        Generate array of angles for residue `aa_id`.
+        Serves as a parallel to `_generate_aa_features` but without featurization (e.g. for plotting).
+        """
+        features = self._single_residue_angles(aa_id)
+        if features.shape[0] == 0:
+            if aa_id not in self.banres:
+                self.banres.append(aa_id)
+            return np.zeros(self.nConf)
+        # Return angles directly
+        return features
+
+    def _calc_result(self, features: np.ndarray, prob: bool = False) -> np.ndarray:
         if prob:
             self.clust_model.fit(features)
             return self.clust_model.predict_proba(features)
@@ -360,123 +390,17 @@ class AngleClusterCalculator(ClusterCalculator):
         """
         self.angle_data = self._all_residues_angles(chain)
         self.resid = resid
-        # collect all clusterings
+        features_all_aa = np.stack([self._generate_aa_features(r) for r in self.resid])
         clusters = np.stack(
             [
-                self._clust_aa(r, prob=prob)
-                for r in console.tqdm(self.resid, desc="Calculating clusters")
-            ],
-            axis=0,
-        )
-        return clusters, self.banres
-
-    def _draw_clusters_single_aa(
-        self, aa_id: int, ax: Optional[plt.Axes] = None
-    ) -> plt.Axes:
-        """
-        Calculate clusters for the residue specified by `aa_id`,
-        then plot the two first angles in `self.angleDict` over all conformers,
-        colour-coded by cluster assignment.
-        """
-        if ax is None:
-            fig, ax = plt.subplots(1, 1, squeeze=True)
-        clusters = self._clust_aa(aa_id)
-        angles = self._single_residue_angles(aa_id)
-        ax.scatter(
-            x=angles[:, 0],
-            y=angles[:, 1],
-            c=clusters,
-            marker=".",
-        )
-        ax.set_xlim(-180, 180)
-        ax.set_ylim(-180, 180)
-        ax.set_xlabel(f"${self._angle_to_tex(self.angleDict[0])}$")
-        ax.set_ylabel(f"${self._angle_to_tex(self.angleDict[1])}$")
-        return ax
-
-    def draw_clusters(
-        self,
-        chain_id: Optional[str] = None,
-        angles: Optional[Tuple[str, str]] = None,
-        aa_ids: Optional[List[int]] = None,
-        combine: Optional[int] = None,
-        output_dir: Optional[str | os.PathLike] = None,
-    ) -> List[plt.Figure]:
-        """
-        Draw clusters of angles for each residue using `_draw_clusters_single_aa()`,
-        then combine `combine` individual plots per figure to save/return.
-
-        Each parameter's default behaviour can be obtained by setting it to `None`.
-
-        :param chain_id: Which chain to draw angles from (*default:* first in protein)
-        :param angles: Which two angles to use (*default:* first two in `self.angleDict`)
-        :param aa_ids: Which residues to use (*default:* all allowed)
-        :param combine: How many residues to combine as subplots per figure (*default:* `min(9, len(aa_ids))`)
-        :param output_dir: Where to save resulting figures to (*default:* do not save)
-        """
-        # Set default values
-        if chain_id is None:
-            chain_id = next(self.structure.get_chains()).id
-        if angles is None:
-            angles = (self.angleDict[0], self.angleDict[1])
-        if aa_ids is None:
-            aa_ids = sorted(
-                {
-                    res.id[1]
-                    for model in self.structure.get_models()
-                    for res in model[chain_id].get_residues()
-                    if is_aa(res, standard=True)
-                    and res.internal_coord
-                    and res.get_resname() not in self.bannedRes
-                }
-            )
-        if combine is None:
-            combine = min(9, len(aa_ids))
-
-        # Temporarily restrict `self.angle_data` to the angle types set in `angles`
-        self.angleDict = [angles[0], angles[1]]
-        old_angle_data = self.angle_data
-        self.angle_data = self._all_residues_angles(chain_id)
-
-        # Set up figures & axes
-        figs = []
-        axs = []
-        nrows = int(np.sqrt(combine))
-        ncols = combine // nrows
-        for i in range(len(aa_ids)):
-            idx = i % combine
-            if idx == 0:
-                figs.append(
-                    plt.figure(
-                        layout="compressed",
-                        figsize=(4.8 * ncols, 3.6 * nrows),
-                    )
+                self._calc_result(features, prob)
+                for features in console.tqdm(
+                    features_all_aa, desc="Calculating clusters"
                 )
-            axs.append(figs[-1].add_subplot(nrows, ncols, idx + 1))
-
-        # Draw clusters on each figure
-        fig_aa_ids: dict[plt.Figure | plt.SubFigure, list[int]] = {
-            fig: [] for fig in figs
-        }
-        for aa_id, ax in zip(console.tqdm(aa_ids, desc="Drawing clusters"), axs):
-            assert ax.figure is not None  # for mypy
-            fig_aa_ids[ax.figure].append(aa_id)
-            self._draw_clusters_single_aa(aa_id=aa_id, ax=ax)
-            ax.set_title(f"Residue {aa_id}")
-
-        # Save figures
-        if output_dir is not None:
-            os.makedirs(output_dir, exist_ok=True)
-            for fig in figs:
-                aa_ids = fig_aa_ids[fig]
-                if len(aa_ids) > 1:
-                    filename = f"angles_{angles[0]}-{angles[1]}_resid_{aa_ids[0]}-{aa_ids[-1]}.svg"
-                else:
-                    filename = f"angles_{angles[0]}-{angles[1]}_resid_{aa_ids[0]}.svg"
-                fig.savefig(os.path.join(output_dir, filename))
-
-        # Reset `self.angle_data` to previous value
-        self.angle_data = old_angle_data
-        self.angle_data = self._all_residues_angles(chain_id)
-
-        return figs
+            ]
+        )
+        angles_to_draw = np.stack([self._generate_aa_angles(r) for r in self.resid])
+        figs = self.io.draw_clustering_results(angles_to_draw, clusters, chain)
+        for f in figs:
+            f.close()
+        return clusters, self.banres
